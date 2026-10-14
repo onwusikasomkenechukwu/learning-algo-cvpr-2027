@@ -99,6 +99,22 @@ METHODS = {
 }
 
 
+def pin_worker(cpus):
+    """Pool initializer: restrict a worker to the given logical CPUs (Linux only)."""
+    if cpus:
+        os.sched_setaffinity(0, cpus)
+        cv2.setNumThreads(1)
+
+
+def parse_cpus(spec):
+    """'0-15' or '0,2,4-7' -> {0, ..., 15}."""
+    out = set()
+    for part in filter(None, spec.split(",")):
+        a, _, b = part.partition("-")
+        out.update(range(int(a), int(b or a) + 1))
+    return out
+
+
 def run_pair(task):
     key, m, conf, K1, K2, R_gt, t_gt, args = task
     if args.ratio < 1.0:
@@ -156,6 +172,9 @@ def main():
     ap.add_argument("--max-pairs", type=int, default=0, help="limit pairs per scene (0 = all) for quick tests")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--workers", type=int, default=os.cpu_count())
+    ap.add_argument("--cpus", type=parse_cpus, default=None,
+                    help="pin workers to these logical CPUs for runtime numbers, e.g. 0-15 = P-cores "
+                         "on the i9-12900 (check lscpu -e); Linux only")
     ap.add_argument("--out", type=Path, default=Path("results"))
     args = ap.parse_args()
 
@@ -170,7 +189,7 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     summary = {"config": {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}, "scenes": {}}
     all_rows = []
-    with Pool(args.workers) as pool:
+    with Pool(args.workers, initializer=pin_worker, initargs=(args.cpus,)) as pool:
         for scene in scenes:
             t0 = time.time()
             rows = list(pool.imap(run_pair, scene_tasks(args.data / scene, args), chunksize=16))

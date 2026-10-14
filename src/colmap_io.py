@@ -116,3 +116,24 @@ def read_model(model_dir, with_points=True):
     if (d / "images.txt").exists():
         return read_cameras_txt(d / "cameras.txt"), read_images_txt(d / "images.txt", with_points)
     raise FileNotFoundError(f"no COLMAP model (images.bin / images.txt) in {d}")
+
+
+def read_points3D(model_dir):
+    """{point3D_id: xyz} from points3D.bin or points3D.txt."""
+    d = Path(model_dir)
+    pts = {}
+    if (d / "points3D.bin").exists():
+        with open(d / "points3D.bin", "rb") as f:
+            for _ in range(struct.unpack("<Q", f.read(8))[0]):
+                pid, x, y, z = struct.unpack("<Q3d", f.read(32))
+                f.seek(3 + 8, 1)  # rgb (3 x uint8) + reprojection error (double)
+                track_len = struct.unpack("<Q", f.read(8))[0]
+                f.seek(8 * track_len, 1)  # (image_id, point2D_idx) pairs, int32 each
+                pts[pid] = np.array([x, y, z])
+        return pts
+    for line in (d / "points3D.txt").read_text().splitlines():
+        if line.startswith("#") or not line.strip():
+            continue
+        tok = line.split()
+        pts[int(tok[0])] = np.array(tok[1:4], dtype=float)
+    return pts

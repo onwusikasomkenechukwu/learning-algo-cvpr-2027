@@ -112,5 +112,25 @@ class TestSampler(unittest.TestCase):
         self.assertEqual(out[0][1], 20)
 
 
+class TestHrubyNormalization(unittest.TestCase):
+    def test_normalized_problem_properties(self):
+        """Port of data_sampler.cxx normalize(): view 3's ray centroid maps to the optical axis and its
+        4th point onto y = 0, and the rotations are proper (det = +1)."""
+        from sample_hruby4p3v import normalize
+        rng = np.random.default_rng(3)
+        for _ in range(50):
+            views = [[np.r_[rng.uniform(-0.5, 0.5, 2), 1.0] for _ in range(4)] for _ in range(3)]
+            C, perm3, perm4 = normalize(views)
+            self.assertEqual(sorted(perm3), [0, 1, 2])
+            self.assertEqual(sorted(perm4), [0, 1, 2, 3])
+            for M in C:
+                self.assertAlmostEqual(np.linalg.det(M), 1.0)
+            old_view3 = perm3.index(2)
+            rays = [C[2] @ (v / np.linalg.norm(v)) for v in views[old_view3]]
+            centroid = np.mean(rays, axis=0)
+            self.assertLess(np.hypot(centroid[0], centroid[1]), 1e-12)
+            self.assertLess(abs(rays[perm4[3]][1]), 1e-12)
+
+
 if __name__ == "__main__":
     unittest.main()

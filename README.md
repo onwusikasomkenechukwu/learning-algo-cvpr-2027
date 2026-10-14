@@ -7,6 +7,9 @@ Relative pose baselines and tooling, set up to run on an **offline 4-node cluste
 src/eval_relpose.py             5-point RANSAC (PoseLib / OpenCV) + mAA / AUC evaluation
 src/colmap_io.py                COLMAP model reader (bin + txt), numpy only
 src/sample_tuples.py            GT pairs / triplets from any COLMAP model with co-visibility filters
+src/eval_threeview.py           three-view baselines on Tzamos et al. triplets (their protocol)
+src/sample_hruby4p3v.py         Python port of Hruby et al.'s 4p3v problem-solution sampler
+scripts/make_hruby_data.sh      Hruby Sec. 5.1 data split from ETH3D (anchors / val / train)
 tests/test_core.py              unit tests (stdlib unittest): python -m unittest discover -s tests -v
 scripts/download_tier1.sh       dataset downloads (online machine)
 scripts/extract_tier1.sh        unpack archives into data/
@@ -113,5 +116,37 @@ RANSAC tutorial val split, 9,900 pairs (sacre_coeur + st_peters_square), thresho
 | OpenCV USAC_MAGSAC | 0.8 | 1.0 | 0.597 | 0.416 | 0.560 | 0.700 | ~39 |
 | OpenCV RANSAC | 0.8 | 1.0 | 0.643 | 0.449 | 0.603 | 0.737 | ~274 |
 
+### Test (9 of 11 scenes with public GT, 42,301 pairs)
+PoseLib 5pt LO-RANSAC, ratio 0.8, 1 px: **mAA@10 0.709**, AUC@5/10/20 0.540 / 0.670 / 0.767.
+Per scene: reichstag 0.845, milan 0.824, florence 0.792, lincoln 0.760, sagrada 0.746, st_pauls 0.692,
+british_museum 0.675, mount_rushmore 0.612, piazza_san_marco 0.499.
+
 MAGSAC++ sweep (mAA@10): 0.05 → 0.729, 0.1 → 0.753, 0.25 → 0.741, 0.5 → 0.689, 1 → 0.597, 2 → 0.484, 5 → 0.332.
 Its accuracy peaks near 0.1 px but it then hits the 10k-iteration cap (~27x slower than PoseLib).
+
+## Three-view baselines (Tzamos et al. CVPR 2025 triplets)
+Their protocol: tracks with both LightGlue scores >= 0.5, 5 px epipolar threshold, 100-1000 iterations,
+pose error = max(mean R error, mean t error) over pairs 1-2 and 1-3; "AUC@k" = mean recall at 1..k deg (%).
+PhotoTourism = 12 scenes (St. Peter's Square held out, as in the paper), 5,000 triplets each.
+
+| Method | PT median | PT mean | PT AUC@5/10/20 | Aachen AUC@5/10/20 |
+|---|---|---|---|---|
+| Paper: 5pt+P3P (Table 3) | 1.60 | 5.40 | 62.93 / 74.30 / 83.00 | 43.43 / 56.73 / 68.28 |
+| Paper: 4p3v(M±δ)+R+F+ENM (best) | 1.46 | 4.66 | 66.12 / 77.14 / 85.15 | 44.02 / 57.42 / 68.97 |
+| Ours: `seq_5pt_p3p` (Python, upstream PoseLib) | 1.82 | 11.82 | 59.22 / 70.81 / 79.59 | 39.50 / 55.62 / 68.66 |
+| Ours: `pairwise_5pt` | 1.99 | 11.56 | 57.04 / 69.59 / 79.12 | 40.19 / 57.40 / 70.92 |
+
+Our sequential baseline runs two separate RANSACs; theirs scores and refines all three views jointly,
+which explains most of the PhotoTourism gap (and the higher mean = more outright failures). Exact
+reproduction needs their PoseLib fork (`scripts/build_seed_code.sh`).
+```bash
+python src/eval_threeview.py --method seq_5pt_p3p --threshold 5 --reproj-threshold 5 --scenes <12 scenes>
+python src/eval_threeview.py --data data/tzamos_triplets/threeview/aachen --threshold 5 --reproj-threshold 5
+```
+
+## Hruby et al. 4p3v training data
+`src/sample_hruby4p3v.py` reproduces `data_sampler.cxx` (same sampling caps, normalization and output
+format, so their connectivity / anchors / labels binaries read it unchanged). Checked: reconstructed
+inter-point distances agree across the 3 views to 1e-13, view-3 centroid on the optical axis and 4th
+point on y = 0 to 1e-15. `bash scripts/make_hruby_data.sh` builds their split (anchors office+terrains
+40k, val delivery_area+facade 30k, train the other 9 public scenes; the paper used 23 sequences).

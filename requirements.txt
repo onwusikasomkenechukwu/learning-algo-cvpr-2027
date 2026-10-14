@@ -1,0 +1,7 @@
+# Baseline dependencies. CPU only; all available as manylinux wheels so the
+# offline cluster can install from wheelhouse/ (see scripts/build_wheelhouse.sh).
+numpy>=1.26,<2.4
+h5py>=3.10
+poselib>=2.0.4
+opencv-python-headless>=4.9
+tqdm>=4.66

@@ -1,0 +1,9 @@
+# Exact versions verified on 2026-10-14. Install offline on the cluster with:
+#   uv pip install --offline --no-index --find-links wheelhouse -r requirements.lock
+# numpy 2.3 dropped Python 3.10 and numpy 2.2 has no 3.14 wheels, hence the split.
+numpy==2.2.6 ; python_version < "3.11"
+numpy==2.3.5 ; python_version >= "3.11"
+h5py==3.16.0
+poselib==2.0.5
+opencv-python-headless==5.0.0.93
+tqdm==4.70.1

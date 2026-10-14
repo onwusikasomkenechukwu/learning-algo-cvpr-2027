@@ -1,0 +1,9 @@
+# Datasets and large artifacts live outside git; copy them to the cluster separately.
+data/*
+!data/README.md
+wheelhouse/
+results/
+.venv/
+__pycache__/
+*.pyc
+*.log

@@ -9,3 +9,5 @@ __pycache__/
 *.log
 papers/
 third_party/
+Datasets.pdf
+docs/research_brief.*

@@ -8,15 +8,16 @@
 # Cambridge sizes are pinned: HEAD on its download links returns a redirect page, not the zip size.
 # Resumable: re-run to continue partial files; complete files are skipped.
 # Usage: bash scripts/download_tier2.sh [raw_root]   (default: data/raw, a junction to the SSD)
-# ONLY=<regex> limits a run to entries whose folder matches, so different hosts can download in
+# ONLY=<regex> limits a run to entries whose "folder/file" matches, so different hosts can download in
 # parallel without two processes ever touching the same file, e.g.
 #   ONLY=phototourism    bash scripts/download_tier2.sh &
 #   ONLY=ransac_tutorial bash scripts/download_tier2.sh &
-# Each filtered run writes its own log: download_tier2_<ONLY>.log. DRY_RUN=1 lists the selection only.
+# Each filtered run logs to download_tier2_<TAG>.log (TAG defaults to ONLY with symbols replaced). DRY_RUN=1 lists the selection only.
 set -u
 ROOT="${1:-$(dirname "$0")/../data/raw}"
 ONLY="${ONLY:-}"
-LOG="$ROOT/download_tier2${ONLY:+_$ONLY}.log"
+TAG="${TAG:-$(printf %s "$ONLY" | tr -c "A-Za-z0-9_" "_")}"
+LOG="$ROOT/download_tier2${TAG:+_$TAG}.log"
 mkdir -p "$ROOT"
 
 CAM=https://www.repository.cam.ac.uk/bitstreams
@@ -54,7 +55,7 @@ remote_size() { curl -sIL -m 60 "$1" | grep -i '^content-length' | tail -1 | tr 
 status=0
 for entry in "${FILES[@]}"; do
   IFS='|' read -r dir url name size md5 <<<"$entry"
-  [[ -z "$ONLY" || "$dir" =~ $ONLY ]] || continue
+  [[ -z "$ONLY" || "$dir/$name" =~ $ONLY ]] || continue
   if [[ -n "${DRY_RUN:-}" ]]; then echo "would get $dir/$name"; continue; fi
   out="$ROOT/$dir/$name"; mkdir -p "$ROOT/$dir"
   [[ -n "$size" ]] || size=$(remote_size "$url")

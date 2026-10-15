@@ -12,6 +12,16 @@ All three datasets are for non-commercial research use only. Cite the papers eac
 | `tzamos_triplets/threeview/` | Tzamos et al. CVPR 2025 extracted triplets, Zenodo 16603086 (CC-BY-4.0, md5 checked) | 13 PhotoTourism scenes + Aachen v1.1; per scene `K.h5`, `R.h5`, `T.h5` and `triplets-features_superpoint_noresize_2048-LG.{h5,txt}` (SuperPoint + LightGlue, 2048 kp) |
 | `aachen_v1_1/` | Aachen Day-Night v1.1 (data.ciirc.cvut.cz) | `images_upright/db`: 4,479 images; `sequences`: 2,371; `query/day`: 834 and `query/night`: 206 on disk. `3D-models/aachen_v_1_1/`: COLMAP bin + nvm + `database_intrinsics_v1_1.txt` |
 
+## Tier 2 (raw archives in `raw/`, fetched by `scripts/download_tier2.sh`)
+| Folder in `raw/` | Contents | Size | Check |
+|---|---|---|---|
+| `cambridge/` | Cambridge Landmarks: KingsCollege, OldHospital, ShopFacade, StMarysChurch, GreatCourt (Street excluded, as in Tzamos et al.) | 26.5 GB | MD5 from the repository |
+| `phototourism/test/`, `phototourism/train/` | IMC 2020 full scene archives: 8 test + 13 train/val scenes (images, depth, COLMAP) | 84.5 GB | size |
+| `phototourism/` | `imw2020-valid.tar.gz`, `imw2020-test.tar.gz` (challenge-format bundles) | 0.6 GB | size |
+| `ransac_tutorial/` | PnP and homography packs; epipolar training pack (92 GB) | 93.6 GB | size |
+Licenses: Cambridge CC BY-NC-SA 2.0 UK; PhotoTourism has no stated license (YFCC100M images, research use).
+A `.ok` file next to an archive marks a verified download.
+
 ## Gotchas
 - **RANSAC tutorial test pack ships no ground truth.** `scripts/build_test_gt.py` adds `K1_K2.h5`, `R.h5`,
   `T.h5` to 9 of the 11 test scenes from `imc2020_gt/` (IMC 2020 COLMAP models, public since 2022).

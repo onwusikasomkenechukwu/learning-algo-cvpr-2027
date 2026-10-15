@@ -13,6 +13,8 @@ scripts/make_hruby_data.sh      Hruby Sec. 5.1 data split from ETH3D (anchors / 
 tests/test_core.py              unit tests (stdlib unittest): python -m unittest discover -s tests -v
 scripts/download_tier1.sh       dataset downloads (online machine)
 scripts/extract_tier1.sh        unpack archives into data/
+scripts/download_tier2.sh       remaining datasets: Cambridge, full PhotoTourism, tutorial PnP/H/EF-train (online machine)
+scripts/move_to_ssd.ps1         move data/, wheelhouse/, papers/ to an external drive, leave junctions (Windows)
 scripts/download_imc2020_test_gt.sh  stream IMC 2020 archives, keep only COLMAP GT (online machine)
 scripts/build_test_gt.py        turn that GT into K1_K2/R/T.h5 for the tutorial test pack
 scripts/check_gt.py             sanity check: fraction of confident matches consistent with the GT
@@ -29,6 +31,11 @@ requirements-gpu.lock           GPU stack versions (wheelhouse/gpu/)
 data/README.md                  what each dataset contains + gotchas
 ```
 `data/`, `wheelhouse/`, `third_party/`, `papers/` and `results/` are not in git. Copy them separately.
+
+**Storage (2026-10-15):** datasets, the offline bundle and papers live on the external SSD
+(`D:\learning-algo-cvpr\`, exFAT, readable on Ubuntu without extra packages). In the Windows checkout,
+`data/<dataset>`, `wheelhouse/` and `papers/` are junctions to it, so all paths in the scripts are
+unchanged. On the cluster, copy from the SSD into the repo folder (or symlink the same layout).
 
 ## Offline bundle (`wheelhouse/`, built 2026-10-14)
 | Folder | Contents | Size |

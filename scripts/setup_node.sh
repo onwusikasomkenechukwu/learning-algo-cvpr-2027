@@ -11,4 +11,9 @@ echo "node: $(hostname)  python: $("$PY" --version)  $(ldd --version | head -1)"
 [[ -d .venv ]] || "$UV" venv --python "$PY" .venv
 "$UV" pip install --python .venv/bin/python --offline --no-index --find-links wheelhouse -r requirements.lock
 .venv/bin/python -c "import numpy, h5py, poselib, cv2; print('ok: numpy', numpy.__version__, 'poselib', poselib.__version__, 'cv2', cv2.__version__)"
+# scikit-learn (Python 3.14 wheels only) for classifiers and metrics.
+if [[ -d wheelhouse/extra ]]; then
+  "$UV" pip install --python .venv/bin/python --offline --no-index --find-links wheelhouse/extra --find-links wheelhouse -r requirements-extra.lock \
+    && .venv/bin/python -c "import sklearn; print('ok: scikit-learn', sklearn.__version__)"
+fi
 command -v nvidia-smi >/dev/null && nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader || echo "no nvidia-smi"

@@ -12,7 +12,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 PY=${PYTHON:-python}
-mkdir -p wheelhouse/{gpu,build,src,weights} data/raw/tzamos papers
+mkdir -p wheelhouse/{gpu,extra,build,src,weights} data/raw/tzamos papers
 
 fetch() {  # fetch <url> <out> : skip if present and non-empty
   [[ -s "$2" ]] && { echo "have $2"; return; }
@@ -25,6 +25,9 @@ echo "== GPU wheels"
   --platform manylinux_2_28_x86_64 --platform manylinux_2_27_x86_64 \
   --platform manylinux_2_18_x86_64 --platform manylinux_2_17_x86_64 --platform manylinux2014_x86_64 \
   --index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu126
+
+echo "== extra analysis packages (scikit-learn)"
+"$PY" -m pip download --no-deps -r requirements-extra.lock -d wheelhouse/extra   --only-binary=:all: --implementation cp --python-version 3.14   --platform manylinux_2_28_x86_64 --platform manylinux_2_27_x86_64 --platform manylinux_2_17_x86_64 --platform manylinux2014_x86_64
 
 echo "== build tools"
 "$PY" -m pip download -d wheelhouse/build --only-binary=:all: --implementation cp --python-version 3.14 \

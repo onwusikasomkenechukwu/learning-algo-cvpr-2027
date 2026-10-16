@@ -1,0 +1,8 @@
+# Extra analysis packages (scikit-learn for classifiers / metrics), Linux x86_64, Python 3.14.
+# Install offline: uv pip install --offline --no-index --find-links wheelhouse/extra -r requirements-extra.lock
+cloudpickle==3.1.2
+joblib==1.6.0
+numpy==2.3.5
+scikit-learn==1.8.0
+scipy==1.18.1
+threadpoolctl==3.7.0

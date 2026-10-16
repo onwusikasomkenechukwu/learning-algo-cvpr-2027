@@ -252,7 +252,14 @@ def main():
         control = deb_control(data)
         stanzas.append(control.rstrip("\n") + f"\nFilename: ./{dest.name}\nSize: {len(data)}\n"
                        f"SHA256: {hashlib.sha256(data).hexdigest()}\n")
-    (out / "Packages").write_text("\n".join(stanzas))
+    (out / "Packages").write_text("\n".join(stanzas), encoding="utf-8", newline="\n")
+    # Minimal Release file: some apt versions reject flat repos without one, even with [trusted=yes].
+    import email.utils
+    pkgs = (out / "Packages").read_bytes()
+    (out / "Release").write_text(
+        f"Origin: offline-bundle\nLabel: offline-bundle\nSuite: offline\nCodename: offline\n"
+        f"Date: {email.utils.formatdate(usegmt=True)}\nArchitectures: amd64 all\n"
+        f"SHA256:\n {hashlib.sha256(pkgs).hexdigest()} {len(pkgs)} Packages\n", encoding="utf-8", newline="\n")
     print(f"wrote {out / 'Packages'} ({len(stanzas)} packages)")
 
 

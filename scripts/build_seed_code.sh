@@ -39,6 +39,10 @@ fi
 # Eigen 3.4 is header-only but ships its CMake config only after configuring; do that once.
 [[ -f "$TP/eigen/build/Eigen3Config.cmake" ]] || cmake -S "$TP/eigen" -B "$TP/eigen/build" -G Ninja >/dev/null
 EIGEN_ARGS=(-DEigen3_DIR="$TP/eigen/build" -DEIGEN3_INCLUDE_DIR="$TP/eigen")
+# Eigen's build-tree config reports EIGEN3_INCLUDE_DIRS as the (non-existent) install prefix
+# (<repo>/include/eigen3), which learning_minimal uses verbatim; put the source tree on the
+# compiler's default include path so <Eigen/Core> resolves regardless.
+export CPATH="$TP/eigen${CPATH:+:$CPATH}"
 
 echo "== learning_minimal"
 for p in 4p3v 5p2v; do

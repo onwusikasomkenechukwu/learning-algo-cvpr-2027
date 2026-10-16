@@ -32,7 +32,7 @@ rsync -a --info=progress2 $S/apt-bundle $S/wheelhouse $S/papers ~/learning-algo/
 cp $S/private/*.py ~/learning-algo/src/
 cd ~/learning-algo && git log --oneline | head -1
 ```
-**Check:** the last command prints the latest commit; `ls ~/learning-algo/apt-bundle | wc -l` prints 530.
+**Check:** the last command prints the latest commit; `ls ~/learning-algo/apt-bundle | wc -l` prints 531 (529 packages + Packages + Release).
 
 ## 2. Start the dataset copy in the background (~380 GB, 1–2 hours over USB)
 ```bash

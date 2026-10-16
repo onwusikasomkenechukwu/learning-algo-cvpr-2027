@@ -45,14 +45,16 @@ nohup rsync -a $S/data/ ~/learning-algo/data/ > ~/data_copy.log 2>&1 &
 ```bash
 echo "deb [trusted=yes] file:$HOME/learning-algo/apt-bundle ./" | sudo tee /etc/apt/sources.list.d/offline.list
 sudo apt update -o Dir::Etc::sourcelist=sources.list.d/offline.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0
-sudo apt install --no-install-recommends -y build-essential unzip pkg-config \
+sudo apt install -o Dir::Etc::sourcelist=sources.list.d/offline.list -o Dir::Etc::sourceparts=- --no-install-recommends -y build-essential unzip pkg-config \
     libboost1.88-dev libboost-system1.88-dev libopencv-dev \
     linux-modules-nvidia-580-server-open-7.0.0-30-generic nvidia-headless-no-dkms-580-server-open nvidia-utils-580-server
 sudo rm /etc/apt/sources.list.d/offline.list
 ```
 The package versions match the node exactly (resolved from the Ubuntu archive as of 2026-08-25:
 libc6 2.43-2ubuntu2.3, NVIDIA 580.173.02 with Canonical-signed modules for kernel 7.0.0-30), so apt
-installs without upgrading the system.
+installs without upgrading the system. Both `apt update` and `apt install` must get the
+`-o Dir::Etc::...` options: without them, `apt install` also reads the node's old internet package lists,
+prefers newer versions from them and tries (and fails) to download.
 **Check:** `g++ --version` prints GCC 15; `unzip -v | head -1` works.
 
 ## 4. Reboot once for the GPU driver
@@ -93,7 +95,7 @@ Then on each node (asks for the sudo password on that node):
 for n in node1 node2 node3; do
   ssh -t $n 'echo "deb [trusted=yes] file:$HOME/learning-algo/apt-bundle ./" | sudo tee /etc/apt/sources.list.d/offline.list &&
     sudo apt update -o Dir::Etc::sourcelist=sources.list.d/offline.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 &&
-    sudo apt install --no-install-recommends -y build-essential unzip pkg-config libboost1.88-dev libboost-system1.88-dev libopencv-dev linux-modules-nvidia-580-server-open-7.0.0-30-generic nvidia-headless-no-dkms-580-server-open nvidia-utils-580-server &&
+    sudo apt install -o Dir::Etc::sourcelist=sources.list.d/offline.list -o Dir::Etc::sourceparts=- --no-install-recommends -y build-essential unzip pkg-config libboost1.88-dev libboost-system1.88-dev libopencv-dev linux-modules-nvidia-580-server-open-7.0.0-30-generic nvidia-headless-no-dkms-580-server-open nvidia-utils-580-server &&
     sudo rm /etc/apt/sources.list.d/offline.list && sudo reboot'
 done
 ```

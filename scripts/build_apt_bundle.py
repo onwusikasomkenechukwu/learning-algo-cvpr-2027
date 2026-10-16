@@ -258,7 +258,8 @@ def main():
     pkgs = (out / "Packages").read_bytes()
     (out / "Release").write_text(
         f"Origin: offline-bundle\nLabel: offline-bundle\nSuite: offline\nCodename: offline\n"
-        f"Date: {email.utils.formatdate(usegmt=True)}\nArchitectures: amd64 all\n"
+        # Dated 1970 so a target whose clock is behind never sees it as "not valid yet".
+        f"Date: {email.utils.formatdate(0, usegmt=True)}\nArchitectures: amd64 all\n"
         f"SHA256:\n {hashlib.sha256(pkgs).hexdigest()} {len(pkgs)} Packages\n", encoding="utf-8", newline="\n")
     print(f"wrote {out / 'Packages'} ({len(stanzas)} packages)")
 

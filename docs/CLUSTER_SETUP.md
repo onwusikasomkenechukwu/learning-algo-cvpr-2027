@@ -44,7 +44,7 @@ nohup rsync -a $S/data/ ~/learning-algo/data/ > ~/data_copy.log 2>&1 &
 ## 3. Install system packages from the offline bundle (node0, needs your sudo password)
 ```bash
 echo "deb [trusted=yes] file:$HOME/learning-algo/apt-bundle ./" | sudo tee /etc/apt/sources.list.d/offline.list
-sudo apt update -o Dir::Etc::sourcelist=sources.list.d/offline.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0
+sudo apt update -o Acquire::Check-Date=false -o Dir::Etc::sourcelist=sources.list.d/offline.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0
 sudo apt install -o Dir::Etc::sourcelist=sources.list.d/offline.list -o Dir::Etc::sourceparts=- --no-install-recommends -y build-essential unzip pkg-config \
     libboost1.88-dev libboost-system1.88-dev libopencv-dev \
     linux-modules-nvidia-580-server-open-7.0.0-30-generic nvidia-headless-no-dkms-580-server-open nvidia-utils-580-server
@@ -94,7 +94,7 @@ Then on each node (asks for the sudo password on that node):
 ```bash
 for n in node1 node2 node3; do
   ssh -t $n 'echo "deb [trusted=yes] file:$HOME/learning-algo/apt-bundle ./" | sudo tee /etc/apt/sources.list.d/offline.list &&
-    sudo apt update -o Dir::Etc::sourcelist=sources.list.d/offline.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 &&
+    sudo apt update -o Acquire::Check-Date=false -o Dir::Etc::sourcelist=sources.list.d/offline.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 &&
     sudo apt install -o Dir::Etc::sourcelist=sources.list.d/offline.list -o Dir::Etc::sourceparts=- --no-install-recommends -y build-essential unzip pkg-config libboost1.88-dev libboost-system1.88-dev libopencv-dev linux-modules-nvidia-580-server-open-7.0.0-30-generic nvidia-headless-no-dkms-580-server-open nvidia-utils-580-server &&
     sudo rm /etc/apt/sources.list.d/offline.list && sudo reboot'
 done

@@ -19,6 +19,16 @@ All three datasets are for non-commercial research use only. Cite the papers eac
 | `phototourism/test/`, `phototourism/train/` | IMC 2020 full scene archives: 8 test + 13 train/val scenes (images, depth, COLMAP) | 84.5 GB | size |
 | `phototourism/` | `imw2020-valid.tar.gz`, `imw2020-test.tar.gz` (challenge-format bundles) | 0.6 GB | size |
 | `ransac_tutorial/` | PnP and homography packs; epipolar training pack (92 GB) | 93.6 GB | size |
+**Unpacked 2026-10-15** with `scripts/extract_tier2.sh` (archives kept in `raw/`):
+| Folder | Contents (verified counts) |
+|---|---|
+| `cambridge/` | GreatCourt 2,294, KingsCollege 1,565, OldHospital 1,084, ShopFacade 334, StMarysChurch 2,018 image files; each with `dataset_train.txt`, `dataset_test.txt`, `reconstruction.nvm` |
+| `phototourism/<scene>/dense/` | 21 scenes, `images/` + `sparse/{cameras,images,points3D}.bin` + depth maps; image counts match Datasets.pdf (e.g. brandenburg_gate 1,363, notre_dame 3,765, british_museum 660) |
+| `phototourism/imw2020-valid/`, `phototourism/imw-2020-test/` | IMC 2020 challenge-format bundles |
+| `ransac_tutorial/homography/`, `ransac_tutorial/pnp/` | tutorial homography (EVD, HPatchesSeq) and PnP (EPOS correspondences) packs |
+`raw/ransac_tutorial/RANSAC-Tutorial-Data-EF.tar` (92 GB, uncompressed tar) is deliberately left packed: there is not
+enough room on the 465 GB SSD for both copies; unpack it on a cluster node. SSD after unpacking: 423 GB used, 44 GB free.
+
 Licenses: Cambridge CC BY-NC-SA 2.0 UK; PhotoTourism has no stated license (YFCC100M images, research use).
 A `.ok` file next to an archive marks a verified download.
 

@@ -11,3 +11,5 @@ papers/
 third_party/
 Datasets.pdf
 docs/research_brief.*
+.apt-index-cache/
+apt-bundle/

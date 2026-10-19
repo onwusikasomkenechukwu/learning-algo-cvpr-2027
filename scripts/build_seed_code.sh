@@ -59,6 +59,8 @@ echo "== PoseLib@threeview (python package, links libtorch)"
 TORCH_DIR=$("$PY" -c "import torch.utils; print(torch.utils.cmake_prefix_path)")/Torch
 # The fork hard-codes its author's libtorch path; point it at the venv's torch instead.
 sed -i "s|^set(Torch_DIR .*)|set(Torch_DIR $TORCH_DIR)|" "$TP/PoseLib-threeview/CMakeLists.txt"
+# GCC 13 + AVX-512 raises false array-bounds/stringop warnings inside Eigen; don't let -Werror fail on them.
+find "$TP/PoseLib-threeview" -name CMakeLists.txt -not -path "*/pybind11/*" -exec sed -i 's/ -Werror//g' {} +
 ( cd "$TP/PoseLib-threeview" && \
   CMAKE_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DEigen3_DIR=$TP/eigen/build" \
   Eigen3_DIR="$TP/eigen/build" \

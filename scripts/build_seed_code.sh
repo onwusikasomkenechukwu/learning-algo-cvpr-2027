@@ -20,6 +20,9 @@ command -v g++ >/dev/null || { echo "ERROR: no g++ on this node; ask the admin f
 "$UV" pip install --python "$PY" --offline --no-index --find-links wheelhouse/build cmake ninja pybind11 setuptools wheel
 export PATH="$ROOT/.venv/bin:$PATH"   # pip-installed cmake / ninja
 JOBS=$(nproc)
+# CMake 4 rejects cmake_minimum_required(<3.5) (e.g. PoseLib's vendored pybind11); PoseLib's setup.py
+# ignores CMAKE_ARGS, so set the policy floor through the environment, which CMake reads directly.
+export CMAKE_POLICY_VERSION_MINIMUM=3.5
 
 unpack() {  # unpack <tarball-glob> <dest-name>
   [[ -d "$TP/$2" ]] && return

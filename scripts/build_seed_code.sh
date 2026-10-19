@@ -61,6 +61,9 @@ TORCH_DIR=$("$PY" -c "import torch.utils; print(torch.utils.cmake_prefix_path)")
 sed -i "s|^set(Torch_DIR .*)|set(Torch_DIR $TORCH_DIR)|" "$TP/PoseLib-threeview/CMakeLists.txt"
 # GCC 13 + AVX-512 raises false array-bounds/stringop warnings inside Eigen; don't let -Werror fail on them.
 find "$TP/PoseLib-threeview" -name CMakeLists.txt -not -path "*/pybind11/*" -exec sed -i 's/ -Werror//g' {} +
+# Recent libtorch headers require C++20; the fork asks for C++17.
+find "$TP/PoseLib-threeview" -name CMakeLists.txt -not -path "*/pybind11/*" \
+  -exec sed -i -E 's/CMAKE_CXX_STANDARD 1[147]/CMAKE_CXX_STANDARD 20/; s/cxx_std_1[147]/cxx_std_20/g' {} +
 ( cd "$TP/PoseLib-threeview" && \
   CMAKE_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DEigen3_DIR=$TP/eigen/build" \
   Eigen3_DIR="$TP/eigen/build" \

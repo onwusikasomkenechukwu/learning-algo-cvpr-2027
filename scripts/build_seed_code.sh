@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Offline build of the seed papers' code on one cluster node, from wheelhouse/src.
-# Requires a C++ compiler (g++) on the node; CMake/Ninja come from wheelhouse/build, Eigen from source.
+# Build the seed papers' code from the pinned sources in wheelhouse/src (no network needed).
+# Needs: g++ and patch; apt libboost-dev libboost-system-dev libopencv-dev for superansac; the Python
+# env at .venv with torch installed (PoseLib@threeview links the libtorch inside the torch package).
+# CMake/Ninja/pybind11 come from wheelhouse/build, Eigen 3.4.0 from source.
 # Builds into third_party/ (not in git):
 #   learning_minimal (Hruby et al. CVPR 2022): 4p3v + 5p2v binaries
 #   PoseLib@threeview (Tzamos et al. CVPR 2025) as the python package `poselib` in .venv
-#     (replaces upstream poselib; needs setup_node_gpu.sh first because it links libtorch)
+#     (replaces upstream poselib); fixes in scripts/patches/poselib-threeview.patch
 #   threeview evaluation scripts (python, nothing to compile)
-#   superansac: built only if Boost + OpenCV C++ dev packages are present (apt: libboost-dev libopencv-dev)
-# NOT YET TESTED ON THE CLUSTER.
+#   superansac: built only if Boost (incl. system) + OpenCV C++ dev packages are present
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$PWD
@@ -15,14 +16,13 @@ UV=$ROOT/wheelhouse/tools/uv   # absolute: the PoseLib step runs uv from inside 
 PY=$ROOT/.venv/bin/python
 TP=$ROOT/third_party
 mkdir -p "$TP"
-command -v g++ >/dev/null || { echo "ERROR: no g++ on this node; ask the admin for build-essential"; exit 1; }
+command -v g++ >/dev/null || { echo "ERROR: no g++; sudo apt install build-essential"; exit 1; }
+command -v patch >/dev/null || { echo "ERROR: no patch; sudo apt install patch"; exit 1; }
+"$PY" -c "import torch" || { echo "ERROR: torch not importable from $PY"; exit 1; }
 
 "$UV" pip install --python "$PY" --offline --no-index --find-links wheelhouse/build cmake ninja pybind11 setuptools wheel
 export PATH="$ROOT/.venv/bin:$PATH"   # pip-installed cmake / ninja
 JOBS=$(nproc)
-# CMake 4 rejects cmake_minimum_required(<3.5) (e.g. PoseLib's vendored pybind11); PoseLib's setup.py
-# ignores CMAKE_ARGS, so set the policy floor through the environment, which CMake reads directly.
-export CMAKE_POLICY_VERSION_MINIMUM=3.5
 
 unpack() {  # unpack <tarball-glob> <dest-name>
   [[ -d "$TP/$2" ]] && return
@@ -30,17 +30,11 @@ unpack() {  # unpack <tarball-glob> <dest-name>
 }
 unpack "wheelhouse/src/eigen-3.4.0.tar.gz" eigen
 unpack "wheelhouse/src/learning_minimal-*.tar.gz" learning_minimal
-unpack "wheelhouse/src/PoseLib-*.tar.gz" PoseLib-threeview
 unpack "wheelhouse/src/threeview-*.tar.gz" threeview
 unpack "wheelhouse/src/superansac-*.tar.gz" superansac
-# PoseLib's pybind11 submodule is not in GitHub's archive; drop in the pinned copy.
-if [[ ! -f "$TP/PoseLib-threeview/pybind/pybind11/CMakeLists.txt" ]]; then
-  rm -rf "$TP/PoseLib-threeview/pybind/pybind11"
-  tar -xzf wheelhouse/src/pybind11-*.tar.gz -C "$TP/PoseLib-threeview/pybind"
-  mv "$TP"/PoseLib-threeview/pybind/pybind11-* "$TP/PoseLib-threeview/pybind/pybind11"
-fi
 # Eigen 3.4 is header-only but ships its CMake config only after configuring; do that once.
 [[ -f "$TP/eigen/build/Eigen3Config.cmake" ]] || cmake -S "$TP/eigen" -B "$TP/eigen/build" -G Ninja >/dev/null
+export Eigen3_DIR="$TP/eigen/build"   # find_package(Eigen3) also reads this from the environment
 EIGEN_ARGS=(-DEigen3_DIR="$TP/eigen/build" -DEIGEN3_INCLUDE_DIR="$TP/eigen")
 # Eigen's build-tree config reports EIGEN3_INCLUDE_DIRS as the (non-existent) install prefix
 # (<repo>/include/eigen3), which learning_minimal uses verbatim; put the source tree on the
@@ -56,26 +50,27 @@ for p in 4p3v 5p2v; do
 done
 
 echo "== PoseLib@threeview (python package, links libtorch)"
-TORCH_DIR=$("$PY" -c "import torch.utils; print(torch.utils.cmake_prefix_path)")/Torch
-# The fork hard-codes its author's libtorch path; point it at the venv's torch instead.
-sed -i "s|^set(Torch_DIR .*)|set(Torch_DIR $TORCH_DIR)|" "$TP/PoseLib-threeview/CMakeLists.txt"
-# GCC 13 + AVX-512 raises false array-bounds/stringop warnings inside Eigen; don't let -Werror fail on them.
-find "$TP/PoseLib-threeview" -name CMakeLists.txt -not -path "*/pybind11/*" -exec sed -i 's/ -Werror//g' {} +
-# Recent libtorch headers require C++20; the fork asks for C++17.
-find "$TP/PoseLib-threeview" -name CMakeLists.txt -not -path "*/pybind11/*" \
-  -exec sed -i -E 's/CMAKE_CXX_STANDARD 1[147]/CMAKE_CXX_STANDARD 20/; s/cxx_std_1[147]/cxx_std_20/g' {} +
+# Always start from the pristine pinned source so the patch applies exactly (and fails loudly if not);
+# this also discards the build directory and its CMake cache from earlier attempts.
+rm -rf "$TP/PoseLib-threeview"
+unpack "wheelhouse/src/PoseLib-*.tar.gz" PoseLib-threeview
+patch -d "$TP/PoseLib-threeview" -p1 --forward < scripts/patches/poselib-threeview.patch
+# setup.py only forwards Python_EXECUTABLE to CMake; the patched CMakeLists find torch and pybind11
+# through that interpreter. --no-cache: uv would otherwise reuse a wheel built from an older patch.
 ( cd "$TP/PoseLib-threeview" && \
-  CMAKE_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DEigen3_DIR=$TP/eigen/build" \
-  Eigen3_DIR="$TP/eigen/build" \
-  "$UV" pip install --python "$PY" --offline --no-index --no-build-isolation --find-links "$ROOT/wheelhouse/build" . )
-"$PY" -c "import poselib; print('poselib (threeview fork) ok:', [n for n in dir(poselib) if 'three' in n.lower() or '3v' in n.lower()][:8])"
+  "$UV" pip install --python "$PY" --offline --no-index --no-build-isolation --no-cache --reinstall-package poselib . )
+"$PY" -c "import poselib; print('poselib (threeview fork) ok:', poselib.__file__, [n for n in dir(poselib) if 'three' in n.lower() or '3v' in n.lower()][:8])"
 
 echo "== superansac"
-if [[ -d /usr/include/boost && ( -d /usr/include/opencv4 || -d /usr/local/include/opencv4 ) ]]; then
-  cmake -S "$TP/superansac" -B "$TP/superansac/build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 "${EIGEN_ARGS[@]}"
+if [[ -d /usr/include/opencv4 ]] && compgen -G "/usr/lib/*/cmake/boost_system-*/boost_system-config.cmake" >/dev/null; then
+  cmake -S "$TP/superansac" -B "$TP/superansac/build" -G Ninja -DCMAKE_BUILD_TYPE=Release "${EIGEN_ARGS[@]}" \
+    -DPython_EXECUTABLE="$PY" -Dpybind11_DIR="$("$PY" -m pybind11 --cmakedir)"
   cmake --build "$TP/superansac/build" -j "$JOBS"
+  SA_MOD=$(find "$TP/superansac/build" -name 'pysuperansac*.so' | head -1)
+  PYTHONPATH="$(dirname "${SA_MOD:-missing/x}")" "$PY" -c "import pysuperansac; print('pysuperansac ok:', pysuperansac.__file__)"
 else
-  echo "SKIP: Boost / OpenCV C++ headers not found (need libboost-dev libopencv-dev from the admin)"
+  echo "SKIP: needs sudo apt install libboost-dev libboost-system-dev libopencv-dev"
 fi
-echo "done; threeview eval scripts are in $TP/threeview (export PYTHONPATH=$TP/threeview)"
+# The fork loads res/epoch28_sampson.pt, res/anchors.txt, res/nn.txt relative to the working directory;
+# those files live in the threeview repo, so run its evaluation scripts from there.
+echo "done; run threeview evals from $TP/threeview (cd there; export PYTHONPATH=$TP/threeview)"

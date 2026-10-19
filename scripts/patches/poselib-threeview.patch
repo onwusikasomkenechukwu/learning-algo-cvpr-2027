@@ -1,0 +1,74 @@
+Build fixes for kocurvik/PoseLib @ 272ce27dc3b6f44637c3bdea7ff460f06cb538d6 (branch threeview,
+Tzamos et al. CVPR 2025), applied by scripts/build_seed_code.sh to the pristine source tarball.
+
+1. Torch: drop the hard-coded author path (/mnt/d/Research/code/libtorch) and find the libtorch
+   that ships inside the torch package of the Python being built for.
+2. C++20: libtorch >= 2.10 headers refuse C++17 ("#error C++20 or later compatible compiler is
+   required to use ATen"). The standard is set in cmake/LibraryConfig.cmake (PUBLIC, so it also
+   reaches the Python module) and in pybind/CMakeLists.txt.
+3. -Werror removed: GCC 13 with -march=native (AVX-512) reports false-positive array-bounds /
+   stringop-overread warnings inside Eigen 3.4, which -Werror turns into build failures.
+4. pybind11: use the pybind11 installed in the target Python environment instead of the vendored
+   submodule, a Jan 2023 (2.10.3-era) snapshot that predates Python 3.12 and declares
+   cmake_minimum_required(3.4), which CMake 4 rejects. The bindings only use stable pybind11 API
+   (class_, init, arg, dict, str, object, stl/eigen/iostream casters).
+
+diff -ruN a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -10,7 +10,12 @@
+ # Eigen
+ find_package(Eigen3)
+ 
+-set(Torch_DIR /mnt/d/Research/code/libtorch/share/cmake/Torch)
++# Use the libtorch shipped with the torch package of the Python we build for
++# (setup.py passes Python_EXECUTABLE) instead of the author's local libtorch path.
++find_package(Python COMPONENTS Interpreter Development REQUIRED)
++execute_process(COMMAND "${Python_EXECUTABLE}" -c "import torch.utils; print(torch.utils.cmake_prefix_path)"
++                OUTPUT_VARIABLE TORCH_CMAKE_PREFIX OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
++list(APPEND CMAKE_PREFIX_PATH "${TORCH_CMAKE_PREFIX}")
+ find_package(Torch REQUIRED)
+ include_directories(${TORCH_INCLUDE_DIRS})
+ 
+@@ -38,7 +43,7 @@
+ else()
+ 	# If you change this, make sure to update the corresponding line in the pybind CMakeLists
+ 	target_compile_options(${LIBRARY_NAME} PRIVATE
+-		-march=native -Wall -Werror -fPIC -Wno-ignored-optimization-argument)
++		-march=native -Wall -fPIC -Wno-ignored-optimization-argument)
+ 	if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+ 		target_compile_options(${LIBRARY_NAME} PRIVATE
+ 				-Wno-maybe-uninitialized)
+diff -ruN a/cmake/LibraryConfig.cmake b/cmake/LibraryConfig.cmake
+--- a/cmake/LibraryConfig.cmake
++++ b/cmake/LibraryConfig.cmake
+@@ -9,8 +9,8 @@
+ #   - PoseLib::PoseLib alias of PoseLib
+ add_library(${PROJECT_NAME}::${LIBRARY_NAME} ALIAS ${LIBRARY_NAME})
+ 
+-# C++17
+-target_compile_features(${LIBRARY_NAME} PUBLIC cxx_std_17)
++# C++20 (libtorch headers require it)
++target_compile_features(${LIBRARY_NAME} PUBLIC cxx_std_20)
+ 
+ # Add definitions for targets
+ # Values:
+diff -ruN a/pybind/CMakeLists.txt b/pybind/CMakeLists.txt
+--- a/pybind/CMakeLists.txt
++++ b/pybind/CMakeLists.txt
+@@ -3,10 +3,12 @@
+ find_package (Python COMPONENTS Interpreter Development)
+ message(STATUS "Python_EXECUTABLE: " ${Python_EXECUTABLE})
+ 
+-add_subdirectory(pybind11)
++execute_process(COMMAND "${Python_EXECUTABLE}" -m pybind11 --cmakedir
++                OUTPUT_VARIABLE pybind11_DIR OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
++find_package(pybind11 CONFIG REQUIRED)
+ 
+ pybind11_add_module(pyposelib MODULE pyposelib.cc)
+ target_link_libraries(pyposelib PUBLIC PoseLib::PoseLib Eigen3::Eigen)
+-target_compile_features(pyposelib PRIVATE cxx_std_17)
++target_compile_features(pyposelib PRIVATE cxx_std_20)
+ set_target_properties(pyposelib PROPERTIES OUTPUT_NAME poselib)
+-target_compile_options(pyposelib PRIVATE -march=native -Wall -Werror -fPIC -Wno-ignored-optimization-argument)
++target_compile_options(pyposelib PRIVATE -march=native -Wall -fPIC -Wno-ignored-optimization-argument)

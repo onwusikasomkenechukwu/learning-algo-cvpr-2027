@@ -4,6 +4,7 @@
 # threshold their table script reads (results/<scene>-5.0t-<features>.json).
 #   bash scripts/run_tzamos_table.sh                 # eval.py --table (21 methods)
 #   bash scripts/run_tzamos_table.sh --learning -a   # learned (L) variants, appended to the same json
+#   ONLY=aachen bash scripts/run_tzamos_table.sh     # only scenes whose folder name contains "aachen"
 # Results land in third_party/threeview/results/; each scene's summary table is printed, errors and
 # progress bars go to ~/tzamos_stderr.log.
 set -uo pipefail
@@ -17,6 +18,7 @@ export PYTHONPATH=$PWD
 for s in "$ROOT"/data/tzamos_triplets/threeview/*/ "$ROOT"/data/tzamos_triplets/threeview/*/*/; do
   s=${s%/}
   [[ -f "$s/$FEAT.h5" ]] || continue
+  [[ -z "${ONLY:-}" || $(basename "$s") == *"$ONLY"* ]] || continue
   echo "== $(basename "$s")  $(date +%T)"
   "$PY" eval.py -nw "$(nproc)" -t 5.0 "${ARGS[@]}" "$FEAT" "$s" 2>>"$HOME/tzamos_stderr.log" | tail -28 || echo "FAILED: $s"
 done

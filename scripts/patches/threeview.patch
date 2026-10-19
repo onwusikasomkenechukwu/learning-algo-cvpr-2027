@@ -1,0 +1,58 @@
+Fix for kocurvik/threeview @ b43383efba129b8d90e2709092dac6dc87cbbea1 (Tzamos et al. CVPR 2025 eval code),
+applied by scripts/build_seed_code.sh.
+
+The published Aachen triplets (Zenodo 16603086) name images like 'db/123.jpg'; HDF5 stores those as
+nested groups, but eval.py and get_camera_dicts read K.h5 / R.h5 / T.h5 with File.items(), which only
+sees the top-level groups ("IndexError: too many indices for array" on Aachen). Read every dataset
+recursively instead; PhotoTourism files are flat, so their results are unchanged.
+
+diff -ruN a/eval.py b/eval.py
+--- a/eval.py
++++ b/eval.py
+@@ -12,7 +12,7 @@
+ from prettytable import PrettyTable
+ from tqdm import tqdm
+ 
+-from utils.geometry import rotation_angle, angle, get_pose, get_gt_E, force_inliers, get_camera_dicts
++from utils.geometry import rotation_angle, angle, get_pose, get_gt_E, force_inliers, get_camera_dicts, h5_flat_items
+ from utils.vis import draw_results, draw_results_pose_portion, draw_results_pose_auc_10
+ 
+ 
+@@ -349,8 +349,8 @@
+         C_file = h5py.File(os.path.join(dataset_path, f'{args.feature_file}.h5'))
+         triplets = get_triplets(os.path.join(dataset_path, f'{args.feature_file}.txt'))
+ 
+-        R_dict = {k.replace('\\', '/'): np.array(v) for k, v in R_file.items()}
+-        T_dict = {k.replace('\\', '/'): np.array(v) for k, v in T_file.items()}
++        R_dict = {k.replace('\\', '/'): np.array(v) for k, v in h5_flat_items(R_file)}
++        T_dict = {k.replace('\\', '/'): np.array(v) for k, v in h5_flat_items(T_file)}
+         camera_dicts = get_camera_dicts(os.path.join(dataset_path, 'K.h5'))
+ 
+         if args.first is not None:
+diff -ruN a/utils/geometry.py b/utils/geometry.py
+--- a/utils/geometry.py
++++ b/utils/geometry.py
+@@ -110,6 +110,14 @@
+     return np.row_stack([x1, x1_new]), np.row_stack([x2, x2_new])
+ 
+ 
++def h5_flat_items(h5_file):
++    """(name, array) for every dataset, including ones inside groups: the published Aachen files store
++    image names such as 'db/123.jpg' as nested groups, which File.items() does not descend into."""
++    out = []
++    h5_file.visititems(lambda name, obj: out.append((name, np.array(obj))) if isinstance(obj, h5py.Dataset) else None)
++    return out
++
++
+ def get_camera_dicts(K_file_path):
+     K_file = h5py.File(K_file_path)
+ 
+@@ -129,7 +137,7 @@
+ 
+         return d
+ 
+-    for key, v in K_file.items():
++    for key, v in h5_flat_items(K_file):
+         K = np.array(v)
+         d[key.replace('\\', '/')] = {'model': 'PINHOLE', 'width': int(2 * K[0, 2]), 'height': int(2 * K[1,2]), 'params': [K[0, 0], K[1, 1], K[0, 2], K[1, 2]]}
+ 

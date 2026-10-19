@@ -11,7 +11,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$PWD
-UV=wheelhouse/tools/uv
+UV=$ROOT/wheelhouse/tools/uv   # absolute: the PoseLib step runs uv from inside third_party/
 PY=$ROOT/.venv/bin/python
 TP=$ROOT/third_party
 mkdir -p "$TP"

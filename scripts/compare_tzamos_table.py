@@ -54,6 +54,11 @@ def aucs(errs):
     return 100 * frac[:5].mean(), 100 * frac[:10].mean(), 100 * frac.mean()
 
 
+def runtime(rows):
+    """Mean wall time per RANSAC call in ms, as recorded by eval.py (one call per worker process)."""
+    return float(np.mean([r["info"]["runtime"] for r in rows]))
+
+
 def main():
     rdir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parents[1] / "third_party/threeview/results"
     for ds, scenes in DATASETS.items():
@@ -66,20 +71,21 @@ def main():
                 missing.append(sc)
         print(f"\n{ds}: {len(scenes) - len(missing)}/{len(scenes)} scenes"
               + (f" (MISSING: {', '.join(missing)})" if missing else ""))
-        print(f"{'method':<24} {'ours AUC@5/10/20':>20}   {'paper AUC@5/10/20':>20}   {'diff @5/10/20':>18}")
+        print(f"{'method':<24} {'ours AUC@5/10/20':>20} {'ms':>6}   {'paper AUC@5/10/20':>20}   {'diff @5/10/20':>18}")
         for exp, paper in PAPER.items():
-            errs = [err(r) for r in results if r["experiment"] == exp]
-            if not errs:
+            rows = [r for r in results if r["experiment"] == exp]
+            if not rows:
                 continue
-            o = aucs(errs)
+            o, ms = aucs([err(r) for r in rows]), runtime(rows)
             p = paper[ds]
             d = [a - b for a, b in zip(o, p)]
-            print(f"{exp:<24} {o[0]:6.2f} {o[1]:6.2f} {o[2]:6.2f}   {p[0]:6.2f} {p[1]:6.2f} {p[2]:6.2f}   "
+            print(f"{exp:<24} {o[0]:6.2f} {o[1]:6.2f} {o[2]:6.2f} {ms:6.1f}   {p[0]:6.2f} {p[1]:6.2f} {p[2]:6.2f}   "
                   f"{d[0]:+5.2f} {d[1]:+5.2f} {d[2]:+5.2f}")
         # Methods not in Table 2 (e.g. the learned (L) variants from --learning): ours only.
         for exp in sorted({r["experiment"] for r in results} - PAPER.keys()):
-            o = aucs([err(r) for r in results if r["experiment"] == exp])
-            print(f"{exp:<24} {o[0]:6.2f} {o[1]:6.2f} {o[2]:6.2f}   {'(not in paper)':>20}")
+            rows = [r for r in results if r["experiment"] == exp]
+            o, ms = aucs([err(r) for r in rows]), runtime(rows)
+            print(f"{exp:<24} {o[0]:6.2f} {o[1]:6.2f} {o[2]:6.2f} {ms:6.1f}   {'(not in paper)':>20}")
 
 
 if __name__ == "__main__":

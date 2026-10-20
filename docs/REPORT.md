@@ -1,4 +1,4 @@
-# Project status report — learned solvers for calibrated relative pose (CVPR 2027)
+# Project status report — three-view relative pose (CVPR 2027)
 
 *Somkenechukwu Onwusika, 2026-10-20. Everything below was run in this repository; the commands to
 reproduce each number are at the end.*
@@ -18,14 +18,18 @@ reproduce each number are at the end.*
 - **Our own learned sample-triage prototype shows the same pattern.** A classifier picks good minimal
   samples 1.8× faster than random before refinement, but after refinement it ties a one-line
   "prefer well-spread samples" rule (2.88 vs 2.90 draws).
-- **Conclusion so far:** learning that improves individual hypotheses is erased by refinement, and
-  learning inside the RANSAC loop has to be nearly free. The promising place is *deciding which
-  hypotheses to refine at all* (direction 1 in the brief). Your input is needed on the direction, the
-  exact deadline and GPU access (see the end).
+- **Direction (set by Dr. Aryal, 2026-10-20):** the paper targets three-view relative pose with an
+  unknown focal length shared by the three views (the 4p3vf problem) inside LO-RANSAC, evaluated against
+  the six-point pipeline (6pt+P3P) on Cambridge Landmarks and ETH3D, including low-inlier SIFT matches.
+  The method is in Dr. Aryal's draft and is not described here before submission. Key dates: author order
+  Nov 3, paper enrollment Nov 10, supplementary material Nov 23 (2026). Section 6 lists what this repository
+  contributes and what is still open.
+- Sections 4–5 show that learned improvements to individual hypotheses are erased by refinement; they
+  close the triage direction of the brief and remain as background for the paper's design choices.
 
-The research brief with the paper analysis and ranked directions is in
-[`docs/research_brief.md`](research_brief.md) (also as [`.docx`](research_brief.docx)); it predates the
-Tzamos reproduction below, which updates its direction 2.
+The research brief with the paper analysis is in [`docs/research_brief.md`](research_brief.md) (also as
+[`.docx`](research_brief.docx)). It predates both the Tzamos reproduction and the chosen direction, so its
+ranked directions are superseded by section 6.
 
 ## 1. Setup
 
@@ -153,21 +157,30 @@ Code: [`src/triage_prototype.py`](../src/triage_prototype.py); per-scene results
 [`results/triage_lo/`](../results/triage_lo/) (`report_y.json` raw, `report_y_lo.json` after refinement,
 `report_y_pick.json` best-scoring candidate).
 
-## 6. Where this points
+## 6. Plan and open work for the paper
 
-Two independent results (sections 4 and 5) say the same thing: learning that improves *individual*
-hypotheses is erased by refinement, and anything learned that runs inside the loop competes with a
-~50 ms refined baseline. The remaining lever is the one the brief ranked first: **learned hypothesis triage
-before refinement** — predict which hypotheses are worth refining and skip the rest. It only helps if
-refinement is a large share of runtime, so the next measurement is the per-stage timing breakdown inside
-the fork (sampling / solving / scoring / refinement), which the setup now supports.
+The paper works on the shared-focal three-view problem and is evaluated with the PoseLib fork of
+Tzamos et al. (commit `272ce27`, branch `threeview`, the latest upstream; built here with the patches of
+section 1). What this repository provides and what is still to do:
 
-## 7. Decisions needed
+| Item | Status |
+|---|---|
+| Fork builds and runs (C++20 / current PyTorch / Python 3.12 patches) | **done** (section 1) |
+| Reproduction of Tzamos et al. CVPR 2025 Table 2 on the released triplets (supplement) | **done** (section 3): +R rows within 0.2–1.8 AUC@5; rows without refinement and Aachen miss a 0.5 tolerance systematically |
+| Calibrated control rows (5pt+P3P, 4p3v(HC), (M), (M)+R, (M)+ENM, (M)+R+F+ENM, (A)+R+F+ENM, (M±δ)+R+F+ENM) | **done** (section 3); 5pt+P3P+R+F still to add (not in their `--table` set) |
+| Learned (L) variants | weights are released (`res/epoch28_sampson.pt`) and load in the shared-focal estimator too, so the (L) rows are runnable; calibrated results in section 4 |
+| Shared-focal evaluation (their `eval_f.py`) on released data | to do |
+| Cambridge triplets regenerated with SuperPoint + LightGlue and with SIFT; ETH3D triplets | to do: their `datasets/prepare_im.py` hard-codes CUDA, and abl-dell has no GPU (patch for CPU or use a GPU machine) |
+| Reproduction of the shared-focal table of arXiv 2303.16078 on regenerated Cambridge triplets | to do, after the triplets |
+| Runtime on one pinned core with the CPU model named | to do (abl-dell CPU model to record) |
+| Hruby et al. 4p3v sampler and HC solver (background for the homotopy work) | sampler ported and verified (section 2), solver built |
 
-1. **Direction:** go ahead with hypothesis triage before refinement (direction 1), or another direction?
-2. **Deadline:** the exact CVPR 2027 submission date.
-3. **Compute:** abl-dell has no GPU. Fine for the RANSAC work; if we train anything non-trivial or need
-   SuperPoint/LightGlue matching (e.g. Cambridge triplets), is there a GPU machine I can use?
+## 7. Open questions
+
+1. **Roles:** which student takes which part (geometry / HC, learning, evaluation, writing).
+2. **Reproduction tolerance:** how to report the Table 2 rows that miss the paper systematically
+   (section 3, findings 2–4): as measured, with a note on the released code and data?
+3. **Compute:** a GPU for SuperPoint/LightGlue triplet generation, or the CPU route on abl-dell?
 
 ## Reproducing
 

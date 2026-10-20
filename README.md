@@ -4,7 +4,7 @@ Relative pose baselines, reproductions of the seed papers, and research prototyp
 solvers + RANSAC (calibrated two- and three-view relative pose).
 
 - **Status, all results and open decisions: [`docs/REPORT.md`](docs/REPORT.md)** (start here)
-- Research brief (paper analysis, ranked directions): [`docs/research_brief.md`](docs/research_brief.md)
+- Research brief (seed-paper analysis; its directions are superseded by the plan in the report): [`docs/research_brief.md`](docs/research_brief.md)
 - Setup on a lab workstation: [`docs/WORKSTATION_SETUP.md`](docs/WORKSTATION_SETUP.md);
   offline cluster (no internet): [`docs/CLUSTER_SETUP.md`](docs/CLUSTER_SETUP.md)
 

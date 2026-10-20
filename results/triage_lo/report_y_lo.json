@@ -1,0 +1,210 @@
+{
+  "train": [
+    "brandenburg_gate",
+    "buckingham_palace",
+    "colosseum_exterior",
+    "grand_place_brussels",
+    "notre_dame_front_facade",
+    "pantheon_exterior"
+  ],
+  "label": "y_lo",
+  "good_deg": 5.0,
+  "scenes": {
+    "reichstag": {
+      "samples": 39840,
+      "good_rate": 0.4756024096385542,
+      "predict_us_per_sample": 4.280331325072077,
+      "random": {
+        "auc": 0.49699271171570214,
+        "mean_first_good": 2.5714285714285716,
+        "median_first_good": 2.0,
+        "top1_good": 0.4957983193277311
+      },
+      "confidence": {
+        "auc": 0.5075116098146782,
+        "mean_first_good": 2.8445378151260505,
+        "median_first_good": 2.0,
+        "top1_good": 0.47689075630252103
+      },
+      "min-distance rule": {
+        "auc": 0.5865552471245405,
+        "mean_first_good": 2.125,
+        "median_first_good": 1.0,
+        "top1_good": 0.648109243697479
+      },
+      "learned": {
+        "auc": 0.6316938417186676,
+        "mean_first_good": 2.1827731092436973,
+        "median_first_good": 1.0,
+        "top1_good": 0.6113445378151261
+      }
+    },
+    "sacre_coeur": {
+      "samples": 38200,
+      "good_rate": 0.4946596858638743,
+      "predict_us_per_sample": 3.397044502028035,
+      "random": {
+        "auc": 0.49627803543412363,
+        "mean_first_good": 3.023051591657519,
+        "median_first_good": 2.0,
+        "top1_good": 0.49396267837541163
+      },
+      "confidence": {
+        "auc": 0.5463180767333169,
+        "mean_first_good": 3.3293084522502743,
+        "median_first_good": 2.0,
+        "top1_good": 0.47420417124039516
+      },
+      "min-distance rule": {
+        "auc": 0.6290894525551864,
+        "mean_first_good": 2.3863885839736554,
+        "median_first_good": 1.0,
+        "top1_good": 0.7014270032930845
+      },
+      "learned": {
+        "auc": 0.677301106227452,
+        "mean_first_good": 2.4182217343578487,
+        "median_first_good": 1.0,
+        "top1_good": 0.6684961580680571
+      }
+    },
+    "taj_mahal": {
+      "samples": 39800,
+      "good_rate": 0.3742462311557789,
+      "predict_us_per_sample": 3.4411055276909814,
+      "random": {
+        "auc": 0.5019418577435477,
+        "mean_first_good": 3.9599056603773586,
+        "median_first_good": 2.0,
+        "top1_good": 0.45754716981132076
+      },
+      "confidence": {
+        "auc": 0.5132504416413118,
+        "mean_first_good": 4.669811320754717,
+        "median_first_good": 2.0,
+        "top1_good": 0.39858490566037735
+      },
+      "min-distance rule": {
+        "auc": 0.5764220142617811,
+        "mean_first_good": 3.0495283018867925,
+        "median_first_good": 1.0,
+        "top1_good": 0.5778301886792453
+      },
+      "learned": {
+        "auc": 0.613803661702317,
+        "mean_first_good": 3.0707547169811322,
+        "median_first_good": 1.0,
+        "top1_good": 0.5683962264150944
+      }
+    },
+    "temple_nara_japan": {
+      "samples": 39480,
+      "good_rate": 0.35511651469098277,
+      "predict_us_per_sample": 3.661517224396299,
+      "random": {
+        "auc": 0.501377190367705,
+        "mean_first_good": 4.115065243179123,
+        "median_first_good": 2.0,
+        "top1_good": 0.40213523131672596
+      },
+      "confidence": {
+        "auc": 0.5084925782156117,
+        "mean_first_good": 4.6820877817319095,
+        "median_first_good": 2.0,
+        "top1_good": 0.36298932384341637
+      },
+      "min-distance rule": {
+        "auc": 0.6014949256084619,
+        "mean_first_good": 2.922894424673784,
+        "median_first_good": 1.0,
+        "top1_good": 0.627520759193357
+      },
+      "learned": {
+        "auc": 0.6708754032786738,
+        "mean_first_good": 2.937129300118624,
+        "median_first_good": 1.0,
+        "top1_good": 0.6132858837485172
+      }
+    },
+    "trevi_fountain": {
+      "samples": 36960,
+      "good_rate": 0.3308712121212121,
+      "predict_us_per_sample": 3.419201839357429,
+      "random": {
+        "auc": 0.4948897632184915,
+        "mean_first_good": 4.511713933415536,
+        "median_first_good": 2.0,
+        "top1_good": 0.36744759556103573
+      },
+      "confidence": {
+        "auc": 0.5823016504757764,
+        "mean_first_good": 4.801479654747226,
+        "median_first_good": 2.0,
+        "top1_good": 0.34155363748458695
+      },
+      "min-distance rule": {
+        "auc": 0.6516759964332085,
+        "mean_first_good": 3.246609124537608,
+        "median_first_good": 1.0,
+        "top1_good": 0.5166461159062885
+      },
+      "learned": {
+        "auc": 0.6968712399304818,
+        "mean_first_good": 3.147965474722565,
+        "median_first_good": 1.0,
+        "top1_good": 0.5499383477188656
+      }
+    },
+    "palace_of_westminster": {
+      "samples": 33640,
+      "good_rate": 0.271640903686088,
+      "predict_us_per_sample": 3.4728894190415387,
+      "random": {
+        "auc": 0.49772738881031486,
+        "mean_first_good": 5.013513513513513,
+        "median_first_good": 2.0,
+        "top1_good": 0.3633633633633634
+      },
+      "confidence": {
+        "auc": 0.5399116051630287,
+        "mean_first_good": 5.882882882882883,
+        "median_first_good": 3.0,
+        "top1_good": 0.2987987987987988
+      },
+      "min-distance rule": {
+        "auc": 0.6693255944248788,
+        "mean_first_good": 3.684684684684685,
+        "median_first_good": 1.0,
+        "top1_good": 0.527027027027027
+      },
+      "learned": {
+        "auc": 0.7279737362795226,
+        "mean_first_good": 3.5105105105105103,
+        "median_first_good": 1.0,
+        "top1_good": 0.5165165165165165
+      }
+    }
+  },
+  "mean_over_test_scenes": {
+    "random": {
+      "auc": 0.4982011578816475,
+      "mean_first_good": 3.8657797522619366,
+      "top1_good": 0.4300423929592648
+    },
+    "confidence": {
+      "auc": 0.5329643270072874,
+      "mean_first_good": 4.36835131791551,
+      "top1_good": 0.39217026555501594
+    },
+    "min-distance rule": {
+      "auc": 0.6190938717346762,
+      "mean_first_good": 2.902517519959421,
+      "top1_good": 0.5997600562994135
+    },
+    "learned": {
+      "auc": 0.6697531648561857,
+      "mean_first_good": 2.877892474322396,
+      "top1_good": 0.5879962783803628
+    }
+  }
+}

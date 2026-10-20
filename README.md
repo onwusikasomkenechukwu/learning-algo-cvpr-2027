@@ -1,6 +1,8 @@
 # learning-algo: learned minimal solvers + RANSAC (CVPR target)
 
-Relative pose baselines and tooling, set up to run on an **offline 4-node cluster** (CPU now, T1000 GPUs for feature matching).
+Relative pose baselines and tooling for learned minimal solvers + RANSAC.
+
+**Current status, results and open decisions: [`docs/REPORT.md`](docs/REPORT.md).** Research brief: [`docs/research_brief.md`](docs/research_brief.md). Setup on a lab workstation: `bash scripts/setup_workstation.sh` ([guide](docs/WORKSTATION_SETUP.md)); the offline-cluster route is in [`docs/CLUSTER_SETUP.md`](docs/CLUSTER_SETUP.md).
 
 ## Layout
 ```
@@ -9,6 +11,7 @@ src/colmap_io.py                COLMAP model reader (bin + txt), numpy only
 src/sample_tuples.py            GT pairs / triplets from any COLMAP model with co-visibility filters
 src/eval_threeview.py           three-view baselines on Tzamos et al. triplets (their protocol)
 src/sample_hruby4p3v.py         Python port of Hruby et al.'s 4p3v problem-solution sampler
+src/triage_prototype.py         learned pre-solve sample triage prototype (negative result, see docs/REPORT.md)
 scripts/make_hruby_data.sh      Hruby Sec. 5.1 data split from ETH3D (anchors / val / train)
 tests/test_core.py              unit tests (stdlib unittest): python -m unittest discover -s tests -v
 scripts/download_tier1.sh       dataset downloads (online machine)

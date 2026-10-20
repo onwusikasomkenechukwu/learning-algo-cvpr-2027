@@ -35,6 +35,8 @@ unpack "wheelhouse/src/threeview-*.tar.gz" threeview
 # h5_flat_items, so its presence means the patch is in.
 grep -q h5_flat_items "$TP/threeview/eval.py" \
   || patch -d "$TP/threeview" -p1 --forward < scripts/patches/threeview.patch
+grep -q "DEVICE = " "$TP/threeview/datasets/prepare_im.py" \
+  || patch -d "$TP/threeview" -p1 --forward < scripts/patches/threeview-cpu.patch
 rm -f "$TP"/threeview/*.rej "$TP"/threeview/*/*.rej "$TP"/threeview/*.orig "$TP"/threeview/*/*.orig
 unpack "wheelhouse/src/superansac-*.tar.gz" superansac
 # Eigen 3.4 is header-only but ships its CMake config only after configuring; do that once.

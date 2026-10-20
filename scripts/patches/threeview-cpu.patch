@@ -1,0 +1,84 @@
+CPU fallback and Cambridge image path for kocurvik/threeview @ b43383efba129b8d90e2709092dac6dc87cbbea1,
+for task 1.6 (triplet generation on machines without CUDA: abl-dell, the laptop). Applied by
+scripts/build_seed_code.sh after threeview.patch.
+
+- datasets/prepare_im.py and utils/matching.py hard-code .cuda(); use DEVICE = cuda if available, else cpu.
+- For Cambridge, get_dataset_paths expects images in <scene>/<scene>/ (hloc layout); the original zips keep
+  them in <scene>/, so fall back to that when <scene>/<scene> does not exist. model_train comes from
+  scripts/cambridge_nvm_to_colmap.py.
+
+--- a/datasets/prepare_im.py
++++ b/datasets/prepare_im.py
+@@ -15,6 +15,9 @@
+ from utils.matching import LoFTRMatcher, get_matcher_string, get_extractor, read_loftr_image
+ from utils.read_write_colmap import cam_to_K, read_model, Image
+ 
++# Run on the CPU when no CUDA device is present (laptop, abl-dell).
++DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
++
+ 
+ def parse_args():
+     parser = argparse.ArgumentParser()
+@@ -80,7 +83,7 @@
+     for img_id, img in tqdm(images.items()):
+         img_path = os.path.join(img_dir_path, img.name)
+         name = img.name.split('.')[0]
+-        image_tensor = load_image(img_path).cuda()
++        image_tensor = load_image(img_path).to(DEVICE)
+         cam = cameras[img.camera_id]
+ 
+         if cam.width != image_tensor.size(-1):
+@@ -163,7 +166,7 @@
+ 
+     features = torch.load(os.path.join(out_dir, f"{get_matcher_string(args)}.pt"))
+ 
+-    matcher = lightglue.LightGlue(features=args.features).eval().cuda()
++    matcher = lightglue.LightGlue(features=args.features).eval().to(DEVICE)
+ 
+     if args.area is not None:
+         h5_path_str = f'triplets-a{args.area}-{get_matcher_string(args)}-LG.h5'
+@@ -288,7 +291,7 @@
+     random.seed(args.seed)
+     output = 0
+ 
+-    matcher = LoFTRMatcher(max_dim = args.resize, device='cuda')
++    matcher = LoFTRMatcher(max_dim = args.resize, device=DEVICE)
+     args.max_features = 0
+     h5_path = os.path.join(out_dir, f'triplets-{get_matcher_string(args)}.h5')
+     h5_file = h5py.File(h5_path, 'w')
+@@ -427,6 +430,8 @@
+     elif 'cambridge' in basename.lower():
+         model_path = os.path.join(subset_path, 'model_train')
+         img_path = os.path.join(subset_path, subset)
++        if not os.path.isdir(img_path):  # images directly in the scene folder (original Cambridge zips)
++            img_path = subset_path
+     elif 'indoor6' in basename.lower():
+         # model_path = os.path.join(dataset_path, 'indoor6-colmap', f'{subset}-tr', 'sparse', '0')
+         model_path = os.path.join(dataset_path, 'indoor6-colmap', subset, 'sparse', '0')
+--- a/utils/matching.py
++++ b/utils/matching.py
+@@ -6,6 +6,9 @@
+ import cv2
+ import torch
+ 
++# Run on the CPU when no CUDA device is present (laptop, abl-dell).
++DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
++
+ def frame2tensor(frame, device):
+     return torch.from_numpy(frame/255.).float()[None, None].to(device)
+ 
+@@ -59,11 +62,11 @@
+ 
+ def get_extractor(args):
+     if args.features == 'superpoint':
+-        extractor = lightglue.SuperPoint(max_num_keypoints=args.max_features).eval().cuda()
++        extractor = lightglue.SuperPoint(max_num_keypoints=args.max_features).eval().to(DEVICE)
+     elif args.features == 'disk':
+-        extractor = lightglue.DISK(max_num_keypoints=args.max_features).eval().cuda()
++        extractor = lightglue.DISK(max_num_keypoints=args.max_features).eval().to(DEVICE)
+     elif args.features == 'sift':
+-        extractor = lightglue.SIFT(max_num_keypoints=args.max_features).eval().cuda()
++        extractor = lightglue.SIFT(max_num_keypoints=args.max_features).eval().to(DEVICE)
+     else:
+         raise NotImplementedError
+ 

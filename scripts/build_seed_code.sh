@@ -31,9 +31,11 @@ unpack() {  # unpack <tarball-glob> <dest-name>
 unpack "wheelhouse/src/eigen-3.4.0.tar.gz" eigen
 unpack "wheelhouse/src/learning_minimal-*.tar.gz" learning_minimal
 unpack "wheelhouse/src/threeview-*.tar.gz" threeview
-# Patch once; threeview/ also holds eval results, so it is not re-extracted. -R --dry-run succeeds
-# only if the patch is already in.
-patch -d "$TP/threeview" -p1 -R --dry-run -s < scripts/patches/threeview.patch >/dev/null 2>&1 \n  || patch -d "$TP/threeview" -p1 --forward < scripts/patches/threeview.patch
+# Patch once; threeview/ also holds eval results, so it is not re-extracted. The patch adds
+# h5_flat_items, so its presence means the patch is in.
+grep -q h5_flat_items "$TP/threeview/eval.py" \
+  || patch -d "$TP/threeview" -p1 --forward < scripts/patches/threeview.patch
+rm -f "$TP"/threeview/*.rej "$TP"/threeview/*/*.rej "$TP"/threeview/*.orig "$TP"/threeview/*/*.orig
 unpack "wheelhouse/src/superansac-*.tar.gz" superansac
 # Eigen 3.4 is header-only but ships its CMake config only after configuring; do that once.
 [[ -f "$TP/eigen/build/Eigen3Config.cmake" ]] || cmake -S "$TP/eigen" -B "$TP/eigen/build" -G Ninja >/dev/null

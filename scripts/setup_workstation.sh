@@ -9,6 +9,7 @@
 #   LOCAL_COPY=0 (keep everything on the SSD)  KEEP_FREE_GB=50 (never fill the disk past this)
 #   LOCAL_DIR=~/learning-algo-data (where local copies go)
 set -eo pipefail
+trap 'echo; echo "SETUP STOPPED: the command at line $LINENO failed; the error is above"' ERR
 cd "$(dirname "$0")/.."
 ROOT=$PWD
 S=${SSD:-/media/$USER/SSD/learning-algo-cvpr}
@@ -95,7 +96,8 @@ step "5. Build seed-paper code (learning_minimal, PoseLib@threeview, superansac)
 bash scripts/build_seed_code.sh
 
 step "5b. Check: the fork is the poselib Python sees; repo tests"
-python -c "import poselib; assert hasattr(poselib, 'estimate_three_view_relative_pose'), poselib.__file__; print('poselib fork ok:', poselib.__file__)" \n  || die "python imports a poselib without the three-view estimators (see above); re-run this script"
+python -c "import poselib; assert hasattr(poselib, 'estimate_three_view_relative_pose'), poselib.__file__; print('poselib fork ok:', poselib.__file__)" \
+  || die "python imports a poselib without the three-view estimators (see above); re-run this script"
 python -m unittest discover -s tests 2>&1 | tail -3
 
 step "6. Local copies of SSD data (whatever fits while keeping ${KEEP_FREE_GB:=50} GB free)"

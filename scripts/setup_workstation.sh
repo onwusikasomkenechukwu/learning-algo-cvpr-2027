@@ -69,7 +69,9 @@ if ! conda env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
   conda create -y -n "$ENV_NAME" -c conda-forge --override-channels python=3.12
 fi
 conda activate "$ENV_NAME"
-python -m pip install -q -r requirements.lock -r requirements-extra.lock
+# Upstream poselib is left out: the build step installs the threeview fork as `poselib`, and a re-run
+# must not replace the fork with upstream 2.0.5.
+python -m pip install -q -r <(grep -v '^poselib' requirements.lock) -r requirements-extra.lock
 # Exact local version (+cpu / +cu126), so a re-run on a changed machine swaps the build instead of
 # keeping the old one as "already satisfied".
 python -m pip install -q "torch==2.14.1+$TORCH_TAG" "torchvision==0.29.1+$TORCH_TAG"   --index-url "https://download.pytorch.org/whl/$TORCH_TAG"
@@ -79,7 +81,6 @@ fi
 python -m pip install -q kornia==0.8.3 matplotlib prettytable seaborn \
   "git+https://github.com/cvg/LightGlue@eb42fee2d71449efb0aa5c10549752b5d75384d8"
 python -c "import torch; n = torch.cuda.device_count(); print('torch', torch.__version__, '| CUDA available:', torch.cuda.is_available(), '| GPUs:', n)"
-python -m unittest discover -s tests 2>&1 | tail -3
 
 step "4. Links: .venv -> conda env, wheelhouse and data -> SSD"
 for l in .venv wheelhouse; do
@@ -92,6 +93,10 @@ echo "data: $(ls data | tr '\n' ' ')"
 
 step "5. Build seed-paper code (learning_minimal, PoseLib@threeview, superansac)"
 bash scripts/build_seed_code.sh
+
+step "5b. Check: the fork is the poselib Python sees; repo tests"
+python -c "import poselib; assert hasattr(poselib, 'estimate_three_view_relative_pose'), poselib.__file__; print('poselib fork ok:', poselib.__file__)" \n  || die "python imports a poselib without the three-view estimators (see above); re-run this script"
+python -m unittest discover -s tests 2>&1 | tail -3
 
 step "6. Local copies of SSD data (whatever fits while keeping ${KEEP_FREE_GB:=50} GB free)"
 if [[ ${LOCAL_COPY:-1} == 0 ]]; then

@@ -5,6 +5,15 @@ These are the steps that worked on an Ubuntu 24.04 / 2x RTX A6000 workstation on
 Data stays on the external SSD (exFAT, label `SSD`, folder `learning-algo-cvpr/`); nothing large is
 copied to the internal disk. For a machine without internet, use `docs/CLUSTER_SETUP.md` instead.
 
+**Quick way:** steps 0-6 are automated. Clone, then run the script (it stops with a clear message
+if something is missing, and is safe to re-run):
+
+```bash
+git clone https://github.com/onwusikasomkenechukwu/learning-algo-cvpr-2027.git ~/learning-algo
+bash ~/learning-algo/scripts/setup_workstation.sh 2>&1 | tee ~/setup.log
+```
+
+The sections below are the same steps done by hand, for when something needs a closer look.
 Run the commands one at a time. Lines starting with `#` are notes, not commands.
 
 ## 0. Check the machine

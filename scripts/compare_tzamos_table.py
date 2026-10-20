@@ -76,6 +76,10 @@ def main():
             d = [a - b for a, b in zip(o, p)]
             print(f"{exp:<24} {o[0]:6.2f} {o[1]:6.2f} {o[2]:6.2f}   {p[0]:6.2f} {p[1]:6.2f} {p[2]:6.2f}   "
                   f"{d[0]:+5.2f} {d[1]:+5.2f} {d[2]:+5.2f}")
+        # Methods not in Table 2 (e.g. the learned (L) variants from --learning): ours only.
+        for exp in sorted({r["experiment"] for r in results} - PAPER.keys()):
+            o = aucs([err(r) for r in results if r["experiment"] == exp])
+            print(f"{exp:<24} {o[0]:6.2f} {o[1]:6.2f} {o[2]:6.2f}   {'(not in paper)':>20}")
 
 
 if __name__ == "__main__":

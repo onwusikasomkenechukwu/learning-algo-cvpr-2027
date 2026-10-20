@@ -19,10 +19,17 @@ die() { echo; echo "SETUP STOPPED: $*"; exit 1; }
 step "0. Checks"
 lsb_release -ds 2>/dev/null || true
 echo "threads: $(nproc), RAM: $(free -g | awk '/^Mem/{print $2}') GB"
-if command -v nvidia-smi >/dev/null; then
+# The CUDA build of PyTorch needs a working NVIDIA driver to run and the CUDA toolkit for C++ code to
+# link against it (the PoseLib fork does); without a GPU, install the CPU build, which needs neither.
+if command -v nvidia-smi >/dev/null && nvidia-smi -L >/dev/null 2>&1; then
+  GPU=1; TORCH_TAG=cu126
   nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
+  command -v nvcc >/dev/null || [[ -d /usr/local/cuda ]] || echo "WARNING: GPU but no CUDA toolkit (nvcc):
+  the PoseLib fork build will fail at CMake; install one (e.g. sudo apt install nvidia-cuda-toolkit)"
 else
-  echo "WARNING: no nvidia-smi, so no NVIDIA driver: PyTorch will run on CPU only"
+  GPU=0; TORCH_TAG=cpu
+  echo "No working NVIDIA GPU/driver: installing CPU-only PyTorch (all code here runs, neural nets just slower)"
+  lspci 2>/dev/null | grep -i -E "vga|3d|nvidia" || true
 fi
 FREE_GB=$(df -Pk "$HOME" | awk 'NR==2{print int($4/1048576)}')
 echo "free in home: ${FREE_GB} GB"
@@ -55,7 +62,7 @@ for f in "$S"/private/*.py; do
   echo "copied $n"
 done
 
-step "3. Conda env '$ENV_NAME' (Python 3.12, PyTorch 2.14.1 + CUDA 12.6)"
+step "3. Conda env '$ENV_NAME' (Python 3.12, PyTorch 2.14.1+$TORCH_TAG)"
 source "$(conda info --base)/etc/profile.d/conda.sh"
 if ! conda env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
   # conda-forge only: avoids the defaults channel's terms-of-service prompt on new Miniconda installs.
@@ -63,7 +70,12 @@ if ! conda env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
 fi
 conda activate "$ENV_NAME"
 python -m pip install -q -r requirements.lock -r requirements-extra.lock
-python -m pip install -q torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu126
+# Exact local version (+cpu / +cu126), so a re-run on a changed machine swaps the build instead of
+# keeping the old one as "already satisfied".
+python -m pip install -q "torch==2.14.1+$TORCH_TAG" "torchvision==0.29.1+$TORCH_TAG"   --index-url "https://download.pytorch.org/whl/$TORCH_TAG"
+if (( ! GPU )); then  # CUDA runtime wheels left over from a CUDA build: several GB, unused now
+  python -m pip uninstall -y -q $(python -m pip list --format=freeze | grep -oE '^(nvidia-[^=]+|triton)') 2>/dev/null || true
+fi
 python -m pip install -q kornia==0.8.3 matplotlib prettytable seaborn \
   "git+https://github.com/cvg/LightGlue@eb42fee2d71449efb0aa5c10549752b5d75384d8"
 python -c "import torch; n = torch.cuda.device_count(); print('torch', torch.__version__, '| CUDA available:', torch.cuda.is_available(), '| GPUs:', n)"

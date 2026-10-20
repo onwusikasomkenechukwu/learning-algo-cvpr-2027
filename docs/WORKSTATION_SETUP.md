@@ -13,6 +13,11 @@ git clone https://github.com/onwusikasomkenechukwu/learning-algo-cvpr-2027.git ~
 bash ~/learning-algo/scripts/setup_workstation.sh 2>&1 | tee ~/setup.log
 ```
 
+After the build, the script also copies SSD data to the internal disk (`~/learning-algo-data`),
+smallest dataset first, as long as at least 50 GB stays free, and links the repo to the local copies;
+whatever does not fit stays linked to the SSD. It prints which is which. `LOCAL_COPY=0` in front of
+the command skips this; `KEEP_FREE_GB=100` keeps more free. An interrupted copy resumes on re-run.
+
 The sections below are the same steps done by hand, for when something needs a closer look.
 Run the commands one at a time. Lines starting with `#` are notes, not commands.
 

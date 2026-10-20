@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # One-shot setup of a lab workstation (Ubuntu + NVIDIA GPU + internet) from a fresh clone:
-# checks, apt packages, private files, conda env, links to the SSD, seed-code build.
+# checks, apt packages, private files, conda env, links to the SSD, seed-code build, then local copies
+# of whatever SSD data fits on the internal disk (the rest stays linked to the SSD).
 # Safe to re-run: finished steps are skipped or redone harmlessly. Asks for the sudo password once
 # if apt packages are missing. Steps are explained in docs/WORKSTATION_SETUP.md.
 #   bash scripts/setup_workstation.sh 2>&1 | tee ~/setup.log
 # Optional: SSD=/path/to/learning-algo-cvpr  ENV_NAME=cvpr
+#   LOCAL_COPY=0 (keep everything on the SSD)  KEEP_FREE_GB=50 (never fill the disk past this)
+#   LOCAL_DIR=~/learning-algo-data (where local copies go)
 set -eo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$PWD
@@ -31,7 +34,7 @@ command -v conda >/dev/null || die "conda not found: install Miniconda for your 
 curl -sfI --max-time 10 https://github.com >/dev/null || die "no internet; use docs/CLUSTER_SETUP.md"
 
 step "1. System packages"
-PKGS=(build-essential git patch libboost-dev libboost-system-dev libopencv-dev)
+PKGS=(build-essential git patch rsync libboost-dev libboost-system-dev libopencv-dev)
 MISSING=()
 for p in "${PKGS[@]}"; do dpkg -s "$p" >/dev/null 2>&1 || MISSING+=("$p"); done
 if (( ${#MISSING[@]} )); then
@@ -77,6 +80,42 @@ echo "data: $(ls data | tr '\n' ' ')"
 
 step "5. Build seed-paper code (learning_minimal, PoseLib@threeview, superansac)"
 bash scripts/build_seed_code.sh
+
+step "6. Local copies of SSD data (whatever fits while keeping ${KEEP_FREE_GB:=50} GB free)"
+if [[ ${LOCAL_COPY:-1} == 0 ]]; then
+  echo "skipped (LOCAL_COPY=0): everything stays on the SSD"
+else
+  LOCAL=${LOCAL_DIR:-$HOME/learning-algo-data}
+  mkdir -p "$LOCAL"
+  echo "measuring sizes on the SSD (can take a few minutes)..."
+  ON_SSD=(); COPIED=()
+  # Smallest first, so as many datasets as possible end up local. A copy only counts once
+  # .copied_ok exists; an interrupted copy resumes on the next run and stays linked to the SSD until then.
+  while IFS=$'\t' read -r kb src; do
+    src=${src%/}; name=$(basename "$src"); dest=$LOCAL/$name
+    # data/raw holds the downloaded archives, already unpacked into the other folders: not worth the space.
+    [[ $src == */data/raw ]] && { ON_SSD+=("raw (archives)"); continue; }
+    if [[ ! -f $dest/.copied_ok ]]; then
+      have_kb=$(du -sk "$dest" 2>/dev/null | cut -f1); have_kb=${have_kb:-0}
+      free_kb=$(df -Pk "$LOCAL" | awk 'NR==2{print $4}')
+      if (( free_kb - (kb - have_kb) < KEEP_FREE_GB * 1048576 )); then
+        ON_SSD+=("$name ($(( kb / 1048576 )) GB)"); continue
+      fi
+      echo "copying $name ($(( kb / 1048576 )) GB) to $dest"
+      rsync -rt --info=progress2 "$src/" "$dest/"
+      touch "$dest/.copied_ok"
+    fi
+    case $src in
+      */data/*) ln -sfn "$dest" "data/$name" ;;
+      *) ln -sfn "$dest" "$name" ;;   # wheelhouse, papers
+    esac
+    COPIED+=("$name")
+  done < <(du -sk "$S"/data/*/ "$S/wheelhouse" "$S/papers" 2>/dev/null | sort -n)
+  echo "local (in $LOCAL): ${COPIED[*]:-none}"
+  echo "still on the SSD: ${ON_SSD[*]:-none}"
+  df -h "$LOCAL" | tail -1
+  (( ${#ON_SSD[@]} )) || echo "everything is local: the SSD is no longer needed on this machine"
+fi
 
 step "Setup finished"
 echo "Every new terminal: conda activate $ENV_NAME && cd $ROOT"

@@ -3,13 +3,15 @@ for task 1.6 (triplet generation on machines without CUDA: abl-dell, the laptop)
 scripts/build_seed_code.sh after threeview.patch.
 
 - datasets/prepare_im.py and utils/matching.py hard-code .cuda(); use DEVICE = cuda if available, else cpu.
+- LightGlue matching ran with autograd on (only extraction is no_grad); run it under torch.inference_mode().
 - For Cambridge, get_dataset_paths expects images in <scene>/<scene>/ (hloc layout); the original zips keep
   them in <scene>/, so fall back to that when <scene>/<scene> does not exist. model_train comes from
   scripts/cambridge_nvm_to_colmap.py.
 
+diff -ruN a/datasets/prepare_im.py b/datasets/prepare_im.py
 --- a/datasets/prepare_im.py
 +++ b/datasets/prepare_im.py
-@@ -15,6 +15,9 @@
+@@ -15,6 +15,9 @@ from lightglue.utils import load_image
  from utils.matching import LoFTRMatcher, get_matcher_string, get_extractor, read_loftr_image
  from utils.read_write_colmap import cam_to_K, read_model, Image
  
@@ -19,7 +21,7 @@ scripts/build_seed_code.sh after threeview.patch.
  
  def parse_args():
      parser = argparse.ArgumentParser()
-@@ -80,7 +83,7 @@
+@@ -80,7 +83,7 @@ def extract_features(img_dir_path, images, cameras, out_dir, args):
      for img_id, img in tqdm(images.items()):
          img_path = os.path.join(img_dir_path, img.name)
          name = img.name.split('.')[0]
@@ -28,7 +30,7 @@ scripts/build_seed_code.sh after threeview.patch.
          cam = cameras[img.camera_id]
  
          if cam.width != image_tensor.size(-1):
-@@ -163,7 +166,7 @@
+@@ -163,7 +166,7 @@ def create_triplets(out_dir, cameras, images, pts, args):
  
      features = torch.load(os.path.join(out_dir, f"{get_matcher_string(args)}.pt"))
  
@@ -37,7 +39,21 @@ scripts/build_seed_code.sh after threeview.patch.
  
      if args.area is not None:
          h5_path_str = f'triplets-a{args.area}-{get_matcher_string(args)}-LG.h5'
-@@ -288,7 +291,7 @@
+@@ -226,9 +229,10 @@ def create_triplets(out_dir, cameras, images, pts, args):
+                 feats_2 = features[img_2.name.split(".")[0]]
+                 feats_3 = features[img_3.name.split(".")[0]]
+ 
+-                out_12 = matcher({'image0': feats_1, 'image1': feats_2})
+-                out_13 = matcher({'image0': feats_1, 'image1': feats_3})
+-                out_23 = matcher({'image0': feats_2, 'image1': feats_3})
++                with torch.inference_mode():  # no autograd graph: memory grew ~8 GB/h on CPU without this
++                    out_12 = matcher({'image0': feats_1, 'image1': feats_2})
++                    out_13 = matcher({'image0': feats_1, 'image1': feats_3})
++                    out_23 = matcher({'image0': feats_2, 'image1': feats_3})
+ 
+                 scores_12 = out_12['matching_scores0'][0].detach().cpu().numpy()
+                 scores_13 = out_13['matching_scores0'][0].detach().cpu().numpy()
+@@ -288,7 +292,7 @@ def create_triplets_loftr(out_dir, img_path, cameras, images, pts, args):
      random.seed(args.seed)
      output = 0
  
@@ -46,7 +62,7 @@ scripts/build_seed_code.sh after threeview.patch.
      args.max_features = 0
      h5_path = os.path.join(out_dir, f'triplets-{get_matcher_string(args)}.h5')
      h5_file = h5py.File(h5_path, 'w')
-@@ -427,6 +430,8 @@
+@@ -427,6 +431,8 @@ def get_dataset_paths(basename, dataset_path, subset):
      elif 'cambridge' in basename.lower():
          model_path = os.path.join(subset_path, 'model_train')
          img_path = os.path.join(subset_path, subset)
@@ -55,9 +71,10 @@ scripts/build_seed_code.sh after threeview.patch.
      elif 'indoor6' in basename.lower():
          # model_path = os.path.join(dataset_path, 'indoor6-colmap', f'{subset}-tr', 'sparse', '0')
          model_path = os.path.join(dataset_path, 'indoor6-colmap', subset, 'sparse', '0')
+diff -ruN a/utils/matching.py b/utils/matching.py
 --- a/utils/matching.py
 +++ b/utils/matching.py
-@@ -6,6 +6,9 @@
+@@ -6,6 +6,9 @@ from kornia.feature import LoFTR
  import cv2
  import torch
  
@@ -67,7 +84,7 @@ scripts/build_seed_code.sh after threeview.patch.
  def frame2tensor(frame, device):
      return torch.from_numpy(frame/255.).float()[None, None].to(device)
  
-@@ -59,11 +62,11 @@
+@@ -59,11 +62,11 @@ def get_matcher_string(args):
  
  def get_extractor(args):
      if args.features == 'superpoint':

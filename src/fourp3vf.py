@@ -324,6 +324,92 @@ class CambridgeScene:
                         names=[self.cams[v][0] for v in (a, b, c)])
 
 
+def _h5_flat(path):
+    """{name: array} for every dataset in an HDF5 file, nested groups included, with '\\' read as '/'."""
+    import h5py
+    out = {}
+    with h5py.File(path, "r") as f:
+        f.visititems(lambda k, v: out.__setitem__(k.replace("\\", "/"), np.array(v))
+                     if isinstance(v, h5py.Dataset) else None)
+    return out
+
+
+def triangulate_world(P1, P2, u1, u2):
+    """Linear triangulation of N tracks from 3x4 projection matrices and pixel coordinates (N, 2)."""
+    A = np.stack([u1[:, :1] * P1[2] - P1[0], u1[:, 1:] * P1[2] - P1[1],
+                  u2[:, :1] * P2[2] - P2[0], u2[:, 1:] * P2[2] - P2[1]], axis=1)
+    X = np.linalg.svd(A)[2][:, -1]
+    return X[:, :3] / X[:, 3:]
+
+
+class TripletScene:
+    """All-inlier samples from SP+LG triplets written by threeview's prepare_im.py (kill test B, draft Sec. 6.2).
+
+    A track is an inlier when the point triangulated from views 1 and 2 with the reference cameras (each image's
+    own K) lies in front of all three cameras and reprojects within `theta_800` pixels (at the paper's 800 px
+    scale) in all three views. One sample per triplet: four random inlier tracks. The shared focal length is the
+    mean of the three reference focals, x_gt reprojects the triangulated points with it, and coordinates are
+    taken about each image's principal point and divided by the larger image side. With `nvm` (Cambridge), the
+    keypoints are first undistorted with that image's NVM radial term (m_u = m (1 + r |m|^2 / f^2)), since the
+    released triplets keep the raw, distorted keypoints and the solvers assume a pinhole camera.
+    Triplets are visited in a fixed shuffled order; shard s of n takes every n-th one, so shards never overlap."""
+
+    def __init__(self, scene_dir, feature="triplets-features_superpoint_800_2048-LG", theta_800=2.0,
+                 shard=0, nshards=1, order_seed=0, maxside=800, nvm=None):
+        import h5py
+        self.radial = {}
+        if nvm:
+            lines = Path(nvm).read_text().splitlines()
+            i = 0
+            while not lines[i].strip() or lines[i].startswith("NVM"):
+                i += 1
+            for line in lines[i + 1:i + 1 + int(lines[i])]:
+                tok = line.split()
+                self.radial[tok[0].rsplit(".", 1)[0]] = (float(tok[1]), float(tok[9]))
+        d = Path(scene_dir)
+        self.K, self.R, self.T = (_h5_flat(d / f"{n}.h5") for n in ("K", "R", "T"))
+        self.matches = h5py.File(d / f"{feature}.h5", "r")
+        trip = [l.split() for l in (d / f"{feature}.txt").read_text().splitlines() if l.strip()]
+        order = np.random.default_rng(order_seed).permutation(len(trip))
+        self.todo = [trip[i] for i in order[shard::nshards]]
+        self.theta_800, self.maxside = theta_800, maxside
+
+    def instance(self, rng, noise_px=None, thickness=1.0):
+        while self.todo:
+            names = self.todo.pop(0)
+            m = np.array(self.matches["-".join(names)])
+            m = m[np.all(m[:, 6:8] >= 0.5, axis=1)]                # the score filter of the released eval_f.py
+            K = [self.K[n] for n in names]
+            u = [m[:, 2 * i:2 * i + 2] for i in range(3)]
+            for i, n in enumerate(names):
+                if n in self.radial:
+                    f_n, r = self.radial[n]
+                    d = u[i] - K[i][:2, 2]
+                    u[i] = K[i][:2, 2] + d * (1 + r * (d * d).sum(1, keepdims=True) / f_n ** 2)
+            R = [self.R[n] for n in names]
+            T = [self.T[n].reshape(3) for n in names]
+            side = 2 * max(K[0][0, 2], K[0][1, 2])
+            P = [K[i] @ np.hstack([R[i], T[i][:, None]]) for i in range(3)]
+            Xw = triangulate_world(P[0], P[1], u[0], u[1])
+            C = [Xw @ R[i].T + T[i] for i in range(3)]
+            err = np.stack([np.linalg.norm((C[i] @ K[i].T)[:, :2] / C[i][:, 2:] - u[i], axis=1) for i in range(3)])
+            ok = (np.stack(C)[..., 2] > 0).all(0) & (err.max(0) < self.theta_800 * side / self.maxside)
+            inl = np.flatnonzero(ok)
+            if len(inl) < 4:
+                continue
+            pick = rng.choice(inl, 4, replace=False)
+            Rr = np.array([Ri @ R[0].T for Ri in R])
+            tr = np.array([T[i] - Rr[i] @ T[0] for i in range(3)])
+            X = Xw[pick] @ R[0].T + T[0]
+            f = np.mean([(k[0, 0] + k[1, 1]) / 2 for k in K]) / side
+            x = np.array([(u[i][pick] - K[i][:2, 2]) / side for i in range(3)])
+            x_gt = project(f, Rr, tr, X)
+            return dict(f=f, R=Rr, t=tr, X=X, x_gt=x_gt, x=x, z_gt=root_from_scene(f, Rr, tr, X),
+                        maxside=self.maxside, noise_px=float(np.sqrt(((x - x_gt) ** 2).sum(-1).mean()) * self.maxside),
+                        names=names, n_tracks=int(len(m)), n_inliers=int(len(inl)))
+        raise StopIteration
+
+
 # ---------------------------------------------------------------- mean-point seeds (released fork, Sec. 3)
 
 def mean_points(x):

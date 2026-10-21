@@ -20,6 +20,10 @@ Usage:
   python -I src/homotopy_proto.py --n 1000 --noise 0.5 1 2 --mode random --out results/homotopy_proto/random
   python -I src/homotopy_proto.py --n 300 --noise 1 --mode eth3d --out results/homotopy_proto/eth3d
   python -I src/homotopy_proto.py --n 100 --noise 1 --seeds disturbed --out results/homotopy_proto/disturbed
+  python -I src/homotopy_proto.py --mode cambridge --scene data/cambridge/KingsCollege --n 600 --out results/killB_proxy/KingsCollege
+Kill test B on SP+LG triplets, one shard of 8, then the decision over all shards (scripts/run_abl_dell.sh does both):
+  python -I src/homotopy_proto.py --mode triplets --scene <triplets>/KingsCollege --nvm data/cambridge/KingsCollege/reconstruction.nvm --shard 0 --nshards 8 --n 100000 --out results/killB/KingsCollege_shard0
+  python -I src/homotopy_proto.py --merge results/killB/*_shard*.jsonl --out results/killB/killB
 """
 import argparse
 import json
@@ -270,7 +274,8 @@ def disturbed_seeds(inst, rng):
 
 def run_instance(inst, rng, seed_mode):
     x = inst["x"]
-    row = dict(noise_px=inst["noise_px"], names=inst.get("names"))
+    row = dict(noise_px=inst["noise_px"], names=inst.get("names"), n_tracks=inst.get("n_tracks"),
+               n_inliers=inst.get("n_inliers"))
     t0 = time.perf_counter()
     seeds = M.mean_point_seeds(x) if seed_mode == "mean" else disturbed_seeds(inst, rng)
     row["t_seed_ms"] = 1e3 * (time.perf_counter() - t0)
@@ -333,6 +338,41 @@ def summarize(rows):
     return out
 
 
+def merge(paths, out):
+    """Pool result files (shards of one or more scenes), summarize per scene and overall, and apply the kill
+    test B rule (draft Sec. 6.2): continuation reaches the correct root >= 5 pp more often than converged LM,
+    McNemar exact p < 0.05 (before the Holm correction over the four primary tests)."""
+    by_scene = {}
+    for p in paths:
+        scene = Path(p).name.split(".")[0].split("_shard")[0]
+        by_scene.setdefault(scene, []).extend(json.loads(l) for l in open(p) if l.strip())
+    rows = [r for rs in by_scene.values() for r in rs]
+    res = dict(files=paths, scenes={k: summarize(v) for k, v in by_scene.items()}, pooled=summarize(rows),
+               environment=environment())
+    pooled = res["pooled"]
+    if pooled.get("n_strict"):
+        diff = 100 * (pooled["cont"]["strict"] - pooled["lm"]["strict"])
+        p = pooled["mcnemar_cont_vs_lm"]["p"]
+        res["kill_test_B"] = dict(diff_pp=diff, p=p, passes=bool(diff >= 5 and p < 0.05))
+    print(f"{'scene':16s} {'n':>5s} {'strict n':>8s} {'cont %':>7s} {'LM %':>6s} {'NH %':>6s} {'Newton %':>8s} "
+          f"{'McNemar c/l':>11s} {'p':>8s}")
+    for name, s in list(res["scenes"].items()) + [("POOLED", pooled)]:
+        if not s.get("n_strict"):
+            print(f"{name:16s} {s['n']:5d} {0:8d}  (no unambiguous samples)")
+            continue
+        mc = s["mcnemar_cont_vs_lm"]
+        print(f"{name:16s} {s['n']:5d} {s['n_strict']:8d} {100 * s['cont']['strict']:7.1f} "
+              f"{100 * s['lm']['strict']:6.1f} {100 * s['newton_hom']['strict']:6.1f} "
+              f"{100 * s['newton']['strict']:8.1f} {mc['a_only']:5d}/{mc['b_only']:<5d} {mc['p']:8.2g}")
+    if "kill_test_B" in res:
+        k = res["kill_test_B"]
+        print(f"KILL TEST B: cont - LM = {k['diff_pp']:+.1f} pp (needs >= +5), McNemar p = {k['p']:.2g} -> "
+              f"{'PASS' if k['passes'] else 'FAIL'}")
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    Path(f"{out}_summary.json").write_text(json.dumps(res, indent=1, default=float))
+
+
 def environment():
     def git(*a):
         try:
@@ -352,20 +392,37 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--n", type=int, default=200, help="instances per noise level")
     ap.add_argument("--noise", type=float, nargs="+", default=[1.0], help="pixel noise (image side 800 px)")
-    ap.add_argument("--mode", choices=["random", "eth3d", "cambridge"], default="random")
-    ap.add_argument("--scene", help="Cambridge scene folder with reconstruction.nvm (--mode cambridge); real "
-                                    "observations, so --noise is ignored")
+    ap.add_argument("--mode", choices=["random", "eth3d", "cambridge", "triplets"], default="random")
+    ap.add_argument("--scene", help="--mode cambridge: scene folder with reconstruction.nvm; --mode triplets: "
+                                    "prepare_im.py output folder (K/R/T.h5 + triplet files). Real observations, "
+                                    "so --noise is ignored")
+    ap.add_argument("--feature", default="triplets-features_superpoint_800_2048-LG", help="--mode triplets")
+    ap.add_argument("--theta", type=float, default=2.0,
+                    help="--mode triplets: inlier threshold in px at 800 px (draft Sec. 6.1, TODO (E) theta)")
+    ap.add_argument("--shard", type=int, default=0, help="--mode triplets: this process takes triplets "
+                                                         "shard, shard + nshards, ... of a fixed shuffled order")
+    ap.add_argument("--nshards", type=int, default=1)
+    ap.add_argument("--nvm", help="--mode triplets: reconstruction.nvm whose radial terms undistort the keypoints "
+                                  "(Cambridge)")
     ap.add_argument("--eth3d", default="data/eth3d/courtyard/dslr_calibration_undistorted",
                     help="tuning scene for --mode eth3d (only courtyard may be used for tuning)")
     ap.add_argument("--seeds", choices=["mean", "disturbed"], default="mean")
     ap.add_argument("--thickness", type=float, default=1.0, help="< 1 makes the four points nearly coplanar")
     ap.add_argument("--rng", type=int, default=0)
     ap.add_argument("--out", required=True, help="output prefix; writes <out>.jsonl and <out>_summary.json")
+    ap.add_argument("--merge", nargs="+", metavar="JSONL",
+                    help="only summarize these result files (e.g. all shards) into --out and apply the kill test "
+                         "B rule; nothing is run")
     args = ap.parse_args()
+    if args.merge:
+        return merge(args.merge, args.out)
 
     rng = np.random.default_rng(args.rng)
-    scene = M.Eth3dScene(args.eth3d) if args.mode == "eth3d" else         M.CambridgeScene(args.scene) if args.mode == "cambridge" else None
-    if args.mode == "cambridge":
+    scene = M.Eth3dScene(args.eth3d) if args.mode == "eth3d" else \
+        M.CambridgeScene(args.scene) if args.mode == "cambridge" else \
+        M.TripletScene(args.scene, args.feature, args.theta, args.shard, args.nshards, nvm=args.nvm) \
+        if args.mode == "triplets" else None
+    if args.mode in ("cambridge", "triplets"):
         args.noise = ["real"]
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -375,8 +432,11 @@ def main():
         for noise in args.noise:
             rows = []
             for k in range(args.n):
-                inst = scene.instance(rng, noise, args.thickness) if scene else \
-                    M.random_instance(rng, noise, args.thickness)
+                try:
+                    inst = scene.instance(rng, noise, args.thickness) if scene else \
+                        M.random_instance(rng, noise, args.thickness)
+                except StopIteration:  # --mode triplets: this shard has no triplets left
+                    break
                 row = run_instance(inst, rng, args.seeds)
                 row["k"] = k
                 rows.append(row)

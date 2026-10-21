@@ -5,17 +5,20 @@
 #   bash scripts/run_tzamos_table.sh                 # eval.py --table (21 methods)
 #   bash scripts/run_tzamos_table.sh --learning -a   # learned (L) variants, appended to the same json
 #   ONLY=aachen bash scripts/run_tzamos_table.sh     # only scenes whose folder name contains "aachen"
-# Results land in third_party/threeview/results/; each scene's summary table is printed, errors and
-# progress bars go to ~/tzamos_stderr.log.
+#   bash scripts/run_tzamos_table.sh --exps "5p3v + R + C" --tag control   # 5pt+P3P+R+F control row, own json
+#   TRIPLETS=/other/triplets FEAT=<feature file> bash scripts/run_tzamos_table.sh   # other triplets
+# --exps / --tag come from scripts/patches/threeview-eval.patch. Results land in third_party/threeview/results/;
+# each scene's summary table is printed, errors and progress bars go to ~/tzamos_stderr.log.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$PWD
 PY=$ROOT/.venv/bin/python
-FEAT=triplets-features_superpoint_noresize_2048-LG
+FEAT=${FEAT:-triplets-features_superpoint_noresize_2048-LG}
 ARGS=("${@:---table}")
+TRIPLETS=$(realpath -m "${TRIPLETS:-data/tzamos_triplets/threeview}")
 cd third_party/threeview   # the fork loads res/*.pt / res/*.txt relative to the working directory
 export PYTHONPATH=$PWD
-for s in "$ROOT"/data/tzamos_triplets/threeview/*/ "$ROOT"/data/tzamos_triplets/threeview/*/*/; do
+for s in "$TRIPLETS"/*/ "$TRIPLETS"/*/*/; do
   s=${s%/}
   [[ -f "$s/$FEAT.h5" ]] || continue
   [[ -z "${ONLY:-}" || $(basename "$s") == *"$ONLY"* ]] || continue

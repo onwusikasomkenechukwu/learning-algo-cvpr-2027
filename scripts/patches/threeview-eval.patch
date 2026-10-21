@@ -1,0 +1,87 @@
+Evaluation options for kocurvik/threeview @ b43383efba129b8d90e2709092dac6dc87cbbea1, applied by
+scripts/build_seed_code.sh after threeview.patch and threeview-cpu.patch (marker: --exps in eval_f.py).
+
+- eval_f.py (shared-focal evaluation) read K.h5 / R.h5 / T.h5 with File.items() as eval.py did, so it fails
+  on Aachen's nested keys; it now uses h5_flat_items from threeview.patch.
+- eval.py and eval_f.py: --exps "a;b" runs an explicit list of experiments (for example the 5pt+P3P+R+F
+  control row '5p3v + R + C', or a few methods on one pinned core), and --tag X writes
+  results/<scene>-X-<features>.json (focal_<scene>-X-... for eval_f.py), so extra runs never overwrite the
+  main results files.
+
+diff -ruN a/eval.py b/eval.py
+--- a/eval.py
++++ b/eval.py
+@@ -43,6 +43,8 @@
+     parser.add_argument('--rc', action='store_true', default=False)
+     parser.add_argument('-r', '--refine', action='store_true', default=False)
+     parser.add_argument('--all', action='store_true', default=False)
++    parser.add_argument('--exps', type=str, default=None, help="';'-separated experiment names; overrides the preset lists")
++    parser.add_argument('--tag', type=str, default=None, help='suffix for the results json, so extra runs do not overwrite the main one')
+     parser.add_argument('feature_file')
+     parser.add_argument('dataset_path')
+ 
+@@ -317,6 +319,11 @@
+     # experiments.extend([x + ' + C' for x in experiments])
+     # experiments.extend([x + ' + R' for x in experiments])
+ 
++    if args.exps is not None:
++        experiments = [x.strip() for x in args.exps.split(';') if x.strip()]
++    if args.tag is not None:
++        basename = f'{basename}-{args.tag}'
++
+     json_path = os.path.join('results', f'{basename}-{matches_basename}.json')
+     print(f'json_path: {json_path}')
+ 
+diff -ruN a/eval_f.py b/eval_f.py
+--- a/eval_f.py
++++ b/eval_f.py
+@@ -12,7 +12,7 @@
+ from prettytable import PrettyTable
+ from tqdm import tqdm
+ 
+-from utils.geometry import rotation_angle, angle, get_pose, get_gt_E, force_inliers
++from utils.geometry import rotation_angle, angle, get_pose, get_gt_E, force_inliers, h5_flat_items
+ from utils.vis import draw_results
+ 
+ 
+@@ -30,6 +30,8 @@
+     parser.add_argument('-o', '--oracles', action='store_true', default=False)
+     parser.add_argument('-r', '--refine', action='store_true', default=False)
+     parser.add_argument('--all', action='store_true', default=False)
++    parser.add_argument('--exps', type=str, default=None, help="';'-separated experiment names; overrides the preset lists")
++    parser.add_argument('--tag', type=str, default=None, help='suffix for the results json, so extra runs do not overwrite the main one')
+     parser.add_argument('feature_file')
+     parser.add_argument('dataset_path')
+ 
+@@ -55,7 +57,7 @@
+ 
+         return d
+ 
+-    for key, v in K_file.items():
++    for key, v in h5_flat_items(K_file):
+         K = np.array(v)
+         d[key.replace('\\', '/')] = {'model': 'SIMPLE_PINHOLE', 'width': int(2 * K[0, 2]), 'height': int(2 * K[1,2]), 'params': [(K[0, 0] + K[1, 1]) * 0.5, K[0, 2], K[1, 2]]}
+ 
+@@ -283,6 +285,11 @@
+     # experiments.extend([x + ' + C' for x in experiments])
+     # experiments.extend([x + ' + R' for x in experiments])
+ 
++    if args.exps is not None:
++        experiments = [x.strip() for x in args.exps.split(';') if x.strip()]
++    if args.tag is not None:
++        basename = f'{basename}-{args.tag}'
++
+     json_path = os.path.join('results', f'focal_{basename}-{matches_basename}.json')
+     print(f'json_path: {json_path}')
+ 
+@@ -296,8 +303,8 @@
+         C_file = h5py.File(os.path.join(dataset_path, f'{args.feature_file}.h5'))
+         triplets = get_triplets(os.path.join(dataset_path, f'{args.feature_file}.txt'))
+ 
+-        R_dict = {k.replace('\\', '/'): np.array(v) for k, v in R_file.items()}
+-        T_dict = {k.replace('\\', '/'): np.array(v) for k, v in T_file.items()}
++        R_dict = {k.replace('\\', '/'): np.array(v) for k, v in h5_flat_items(R_file)}
++        T_dict = {k.replace('\\', '/'): np.array(v) for k, v in h5_flat_items(T_file)}
+         camera_dicts = get_camera_dicts(os.path.join(dataset_path, 'K.h5'))
+ 
+         if args.first is not None:

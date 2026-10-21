@@ -1,9 +1,12 @@
-CPU fallback and Cambridge image path for kocurvik/threeview @ b43383efba129b8d90e2709092dac6dc87cbbea1,
-for task 1.6 (triplet generation on machines without CUDA: abl-dell, the laptop). Applied by
-scripts/build_seed_code.sh after threeview.patch.
+CPU fallback, resumable matching and Cambridge image path for kocurvik/threeview @
+b43383efba129b8d90e2709092dac6dc87cbbea1, for task 1.6 (triplet generation on machines without CUDA:
+abl-dell, the laptop). Applied by scripts/build_seed_code.sh after threeview.patch.
 
 - datasets/prepare_im.py and utils/matching.py hard-code .cuda(); use DEVICE = cuda if available, else cpu.
 - LightGlue matching ran with autograd on (only extraction is no_grad); run it under torch.inference_mode().
+- Matching is resumable: the match file is flushed every 50 triplets and closed at the end, and a rerun with
+  the same seed reopens it, keeps the triplets already there and continues (an unreadable file starts over).
+  A reboot mid-run otherwise loses hours of matching.
 - For Cambridge, get_dataset_paths expects images in <scene>/<scene>/ (hloc layout); the original zips keep
   them in <scene>/, so fall back to that when <scene>/<scene> does not exist. model_train comes from
   scripts/cambridge_nvm_to_colmap.py.
@@ -30,7 +33,7 @@ diff -ruN a/datasets/prepare_im.py b/datasets/prepare_im.py
          cam = cameras[img.camera_id]
  
          if cam.width != image_tensor.size(-1):
-@@ -163,7 +166,7 @@ def create_triplets(out_dir, cameras, images, pts, args):
+@@ -163,17 +166,28 @@ def create_triplets(out_dir, cameras, images, pts, args):
  
      features = torch.load(os.path.join(out_dir, f"{get_matcher_string(args)}.pt"))
  
@@ -39,7 +42,40 @@ diff -ruN a/datasets/prepare_im.py b/datasets/prepare_im.py
  
      if args.area is not None:
          h5_path_str = f'triplets-a{args.area}-{get_matcher_string(args)}-LG.h5'
-@@ -226,9 +229,10 @@ def create_triplets(out_dir, cameras, images, pts, args):
+     else:
+         h5_path_str = f'triplets-{get_matcher_string(args)}-LG.h5'
+     h5_path = os.path.join(out_dir, h5_path_str)
+-    h5_file = h5py.File(h5_path, 'w')
+-    print("Writing matches to: ", h5_path)
+-
++    # Resume an interrupted run: the sampling is seeded, so re-drawn triplets already in the file are skipped
++    # and count toward the total. A file left unreadable by a crash is started over.
+     triplets = []
++    resume = os.path.exists(h5_path) and args.num_samples is not None and not args.recalc and not args.load
++    try:
++        h5_file = h5py.File(h5_path, 'a' if resume else 'w')
++    except OSError:
++        print("Existing match file is unreadable, starting over: ", h5_path)
++        resume = False
++        h5_file = h5py.File(h5_path, 'w')
++    if resume:
++        h5_file.visititems(lambda k, v: triplets.append(k.replace('-', ' ')) if isinstance(v, h5py.Dataset) else None)
++        output = len(triplets)
++        print(f"Resuming with {output} triplets already in the file")
++    print("Writing matches to: ", h5_path)
+ 
+     id_list = list([k for k, v in images.items()])
+     inverse_id_list = {v.name.split('.')[0]: k for k,v in images.items()}
+@@ -199,7 +213,7 @@ def create_triplets(out_dir, cameras, images, pts, args):
+ 
+     all_counter = 0
+ 
+-    with tqdm(total=total) as pbar:
++    with tqdm(total=total, initial=output) as pbar:
+         while output < total:
+             if args.num_samples is not None:
+                 img_ids = generate_random_samples(images, pts, args)
+@@ -226,9 +240,10 @@ def create_triplets(out_dir, cameras, images, pts, args):
                  feats_2 = features[img_2.name.split(".")[0]]
                  feats_3 = features[img_3.name.split(".")[0]]
  
@@ -53,7 +89,22 @@ diff -ruN a/datasets/prepare_im.py b/datasets/prepare_im.py
  
                  scores_12 = out_12['matching_scores0'][0].detach().cpu().numpy()
                  scores_13 = out_13['matching_scores0'][0].detach().cpu().numpy()
-@@ -288,7 +292,7 @@ def create_triplets_loftr(out_dir, img_path, cameras, images, pts, args):
+@@ -269,11 +284,14 @@ def create_triplets(out_dir, cameras, images, pts, args):
+ 
+                 h5_file.create_dataset(label, shape=out_array.shape, data=out_array)
+                 triplets.append(' '.join([images[x].name.split('.')[0] for x in img_ids]))
++                if len(triplets) % 50 == 0:
++                    h5_file.flush()  # keep the file readable if the run is interrupted
+ 
+                 if args.num_samples is not None:
+                     pbar.update(1)
+                     output += 1
+ 
++    h5_file.close()
+     if args.area is None:
+         triples_txt_path = os.path.join(out_dir, f'triplets-{get_matcher_string(args)}-LG.txt')
+     else:
+@@ -288,7 +306,7 @@ def create_triplets_loftr(out_dir, img_path, cameras, images, pts, args):
      random.seed(args.seed)
      output = 0
  
@@ -62,7 +113,7 @@ diff -ruN a/datasets/prepare_im.py b/datasets/prepare_im.py
      args.max_features = 0
      h5_path = os.path.join(out_dir, f'triplets-{get_matcher_string(args)}.h5')
      h5_file = h5py.File(h5_path, 'w')
-@@ -427,6 +431,8 @@ def get_dataset_paths(basename, dataset_path, subset):
+@@ -427,6 +445,8 @@ def get_dataset_paths(basename, dataset_path, subset):
      elif 'cambridge' in basename.lower():
          model_path = os.path.join(subset_path, 'model_train')
          img_path = os.path.join(subset_path, subset)

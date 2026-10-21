@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Everything the week-2 plan needs from abl-dell, in one command (student instructions v5):
 #   setup      git pull, CPU patch for threeview, LightGlue weights from the SSD, import checks, smoke test
-#   machine    Task 1.3 machine sheet (CPU, NUMA, AVX/FMA, governor, SMT, memory)
+#   machine    Task 1.3 machine sheet (scripts/machine_sheet.sh -> results/abl_dell/machine_sheet.md)
 #   monodromy  Task 1.8 solution count on two more instances (background, ~2 h each, one core each)
 #   triplets   Task 1.6 Cambridge SP+LG triplets for the scenes not finished on the laptop (resumable)
 #   evalf      Tasks 1.7 / 1.9 / 2.2: released eval_f.py (6pt+P3P = 6p3v, 4p3vf(M), (M)+R, ...) on every
@@ -66,18 +66,9 @@ step_setup() {
 }
 
 step_machine() {
-  {
-    echo "== $(hostname) $(date '+%F %T')"; uname -a; nproc
-    lscpu
-    command -v numactl >/dev/null && numactl -H || echo "numactl not installed (sudo apt install numactl)"
-    echo "== ISA flags"; grep -o -w -E 'avx|avx2|avx512f|fma' /proc/cpuinfo | sort | uniq -c
-    echo "== governor"; cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor 2>/dev/null | sort | uniq -c
-    echo "== SMT"; cat /sys/devices/system/cpu/smt/active 2>/dev/null
-    echo "== memory"; free -g
-    echo "== compiler"; gcc --version | head -1
-    echo "== python"; "$PY" -c "import numpy, scipy, torch; print(numpy.__version__, scipy.__version__, torch.__version__)"
-  } >"$OUT/machine_sheet.txt" 2>&1
-  log "machine sheet: $OUT/machine_sheet.txt"
+  PY=$PY bash scripts/machine_sheet.sh "$OUT/machine_sheet.md" "$SSD" >/dev/null 2>"$OUT/machine_sheet.err"
+  { lscpu; command -v numactl >/dev/null && numactl -H; } >"$OUT/machine_raw.txt" 2>&1   # raw output, for checking
+  log "machine sheet: $OUT/machine_sheet.md"
 }
 
 step_monodromy() {

@@ -42,6 +42,10 @@ src/sample_tuples.py            GT pairs / triplets from any COLMAP model with c
 src/eval_threeview.py           three-view baselines on Tzamos et al. triplets (their protocol)
 src/sample_hruby4p3v.py         Python port of Hruby et al.'s 4p3v problem-solution sampler
 src/triage_prototype.py         learned pre-solve sample triage prototype (negative result, see the report)
+src/fourp3vf.py                 4p3vf equations, instance generators (synthetic, ETH3D, Cambridge, SP+LG triplets), mean-point seeds
+src/check_fourp3vf.py           structure checks of the 4p3vf equations (residuals, signs, Props. 1-2, monodromy count)
+src/homotopy_proto.py           single-path homotopy prototype vs LM / Newton from identical seeds; kill test B (--mode triplets, --merge)
+src/sift_triplets.py            RootSIFT + ratio-test tracks for an existing triplet list (low-inlier setting)
 tests/test_core.py              unit tests (stdlib unittest): python -m unittest discover -s tests -v
 
 scripts/setup_workstation.sh    one-shot workstation setup (checks, apt, conda env, SSD links, build)
@@ -49,6 +53,13 @@ scripts/build_seed_code.sh      build learning_minimal (Hruby), PoseLib@threevie
 scripts/patches/                fixes applied to the pinned seed code (rationale at the top of each patch)
 scripts/run_tzamos_table.sh     Tzamos et al.'s own eval.py on every triplet scene (5 px, their table set)
 scripts/compare_tzamos_table.py pool results like their tables.py and compare with the paper's Table 2
+scripts/run_abl_dell.sh         week-2 compute on abl-dell in one background command (status: ... status)
+scripts/machine_sheet.sh        Task 1.3 machine sheet of the timing server (read-only)
+scripts/prepare_triplets.py     their prepare_im.py one scene at a time (Cambridge, ETH3D), CPU ok, resumable
+scripts/cambridge_nvm_to_colmap.py  Cambridge reconstruction.nvm -> COLMAP model_train for prepare_im.py
+scripts/filter_same_camera.py   keep triplets whose three images share one intrinsics block (ETH3D)
+scripts/compare_tzamos_focal.py pool shared-focal eval_f.py results per dataset (AUC, runtime, focal error)
+scripts/runtime_single_core.sh  main estimators on one pinned core, CPU model recorded (timing window only)
 scripts/make_hruby_data.sh      Hruby Sec. 5.1 data split from ETH3D (anchors / val / train)
 scripts/run_baseline.sh         2-view baseline sweep on the RANSAC tutorial val split
 scripts/download_tier1.sh       dataset downloads (online machine)

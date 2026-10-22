@@ -44,6 +44,9 @@ SCENES=(KingsCollege OldHospital ShopFacade StMarysChurch GreatCourt)
 # Tzamos et al.'s ETH3D list (the 13 training scenes without facade)
 ETH_SCENES=(courtyard delivery_area electro kicker meadow office pipes playground relief relief_2 terrace terrains)
 NW=$(( $(nproc) - 2 ))   # leave two cores for interactive work (ground rule 6)
+# One thread per worker process (ground rule 6): without this every eval_f.py worker's PyTorch / BLAS starts
+# a thread per core, and 94 workers x 96 threads stalled the first King's College run for a day.
+ONE_THREAD=(env OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1)
 mkdir -p "$OUT"
 
 if [[ ${1:-} != status && -z ${ABL_BG:-} ]]; then
@@ -145,7 +148,7 @@ step_evalf() {
       [[ -f $dir/$f.txt ]] || continue
       [[ -f $TV/results/focal_$s-$f.json ]] && continue
       log "evalf: $s $f"
-      ( cd "$TV" && PYTHONPATH=$PWD MPLBACKEND=Agg "$PY" -W ignore eval_f.py -nw "$NW" "$f" "$dir" ) \
+      ( cd "$TV" && PYTHONPATH=$PWD MPLBACKEND=Agg "${ONE_THREAD[@]}" "$PY" -W ignore eval_f.py -nw "$NW" "$f" "$dir" ) \
         >"$OUT/evalf_${s}_${f%%-*}.log" 2>&1 || log "evalf $s $f failed (see $OUT/evalf_${s}_${f%%-*}.log)"
     done
   done < <(finished_dirs)
@@ -176,7 +179,7 @@ step_killB() {
 
 step_control() {
   [[ -f $OUT/control.done ]] && { log "control row already done"; return; }
-  bash scripts/run_tzamos_table.sh --exps "5p3v + R + C" --tag control >"$OUT/control.log" 2>&1 \
+  "${ONE_THREAD[@]}" bash scripts/run_tzamos_table.sh --exps "5p3v + R + C" --tag control >"$OUT/control.log" 2>&1 \
     && touch "$OUT/control.done"
   log "control row done (see $OUT/control.log)"
 }
@@ -188,7 +191,7 @@ step_compare() {
 }
 
 step_thresh() {
-  bash scripts/run_tzamos_table.sh --table -t 1.0 >"$OUT/thresh1.log" 2>&1
+  "${ONE_THREAD[@]}" bash scripts/run_tzamos_table.sh --table -t 1.0 >"$OUT/thresh1.log" 2>&1
   log "threshold 1.0 table done (see $OUT/thresh1.log)"
 }
 
@@ -220,7 +223,11 @@ step_status() {
   done
   echo "ETH3D: $n_eth/${#ETH_SCENES[@]} scenes, $n_trip same-camera triplets"
   echo "control row: $([[ -f $OUT/control.done ]] && echo done || echo -)"
-  tail -c 300 "$OUT/triplets.log" 2>/dev/null | tr '\r' '\n' | grep -v '^\s*$' | tail -1
+  local last newest=""
+  for last in "$OUT/triplets.log" "$OUT"/evalf_*.log "$OUT/eth3d.log"; do   # progress bar of the newest job
+    [[ -f $last && ( -z $newest || $last -nt $newest ) ]] && newest=$last
+  done
+  [[ -n $newest ]] && echo "$(basename "$newest"): $(tail -c 400 "$newest" | tr '\r' '\n' | grep -a -v '^\s*$' | tail -1)"
   for r in 8 9; do echo "monodromy rng$r: $(tail -1 "$OUT/monodromy_rng$r.log" 2>/dev/null)"; done
   [[ -f $OUT/killB.txt ]] && tail -1 "$OUT/killB.txt"
   echo "== last log lines"; tail -4 "$OUT/run.log" 2>/dev/null

@@ -147,7 +147,8 @@ run_evalf() {   # run_evalf <triplet dir> <feature> <tag or ""> [eval_f.py optio
   # workers (timeout signals the whole process group) and retried, at most three tries.
   local dir=$1 f=$2 tag=$3 s try; shift 3
   s=$(basename "$dir")
-  local json=$TV/results/focal_$s${tag:+-$tag}-$f.json logf=$OUT/evalf_${s}${tag:+_$tag}_${f%%-*}.log
+  local short=splg; [[ $f == *SIFT* ]] && short=sift   # SP+LG and SIFT logs must not share a name
+  local json=$TV/results/focal_$s${tag:+-$tag}-$f.json logf=$OUT/evalf_${s}${tag:+_$tag}_$short.log
   for try in 1 2 3; do
     [[ -f $json ]] && return 0
     log "evalf: $s $f${tag:+ ($tag)} (try $try)"

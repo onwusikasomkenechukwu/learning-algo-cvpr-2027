@@ -67,6 +67,7 @@ echo "== PoseLib@threeview (python package, links libtorch)"
 rm -rf "$TP/PoseLib-threeview"
 unpack "wheelhouse/src/PoseLib-*.tar.gz" PoseLib-threeview
 patch -d "$TP/PoseLib-threeview" -p1 --forward < scripts/patches/poselib-threeview.patch
+"$PY" scripts/patches/poselib_oob_fixes.py "$TP/PoseLib-threeview"   # sample[4] read past the end in inner_refine
 "$PY" scripts/patches/poselib_shared_focal_refit.py "$TP/PoseLib-threeview"   # kill test A two-view refit
 # setup.py only forwards Python_EXECUTABLE to CMake; the patched CMakeLists find torch and pybind11
 # through that interpreter. --no-cache: uv would otherwise reuse a wheel built from an older patch.

@@ -28,7 +28,7 @@
 # Env: SSD=/media/$USER/SSD/learning-algo-cvpr  NSHARDS=<processes for killB, default nproc - 2>
 #      KB_N=<max samples per killB process, default all>  PY=<python, default .venv/bin/python>
 #      THETA=2.0 (inlier px at 800 px)  UNDISTORT=1 (undistort Cambridge keypoints with the NVM radial terms)
-#      EVALF_TIMEOUT=1800 (seconds before a silent eval_f.py run is killed and retried)
+#      EVALF_TIMEOUT=14400 (outer bound per eval_f.py run; hung, idle runs are killed after 2 min by a watchdog)
 set -uo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$PWD
@@ -141,22 +141,44 @@ step_sift() {
   done < <(finished_dirs)
 }
 
+group_cpu() {   # cumulative CPU seconds of every process in process group $1 (empty if ps cannot tell)
+  ps -eo pgid=,times= 2>/dev/null | awk -v g="$1" '$1 == g {s += $2; n++} END {if (n) print s}'
+}
+
 run_evalf() {   # run_evalf <triplet dir> <feature> <tag or ""> [eval_f.py options...]
-  # eval_f.py forks a Pool it never closes, and on abl-dell a run sometimes froze for good after its work
-  # (St Mary's, 2026-10-22). A run that writes no results file within EVALF_TIMEOUT is killed with its
-  # workers (timeout signals the whole process group) and retried, at most three tries.
-  local dir=$1 f=$2 tag=$3 s try; shift 3
+  # eval_f.py forks a Pool it never closes, and on abl-dell runs sometimes froze for good (St Mary's: 3 of 5
+  # tries on 2026-10-22/23), idle. A watchdog polls the CPU time of the run's process group (timeout makes
+  # one) every 30 s: no CPU for 2 min after it was busy means a hang, and the group is killed and the run
+  # retried (at most four tries). Once the results file exists the run is not waited for any more.
+  # EVALF_TIMEOUT stays as an outer bound for the case where ps cannot read the group.
+  local dir=$1 f=$2 tag=$3 s try pid cpu last idle; shift 3
   s=$(basename "$dir")
   local short=splg; [[ $f == *SIFT* ]] && short=sift   # SP+LG and SIFT logs must not share a name
   local json=$TV/results/focal_$s${tag:+-$tag}-$f.json logf=$OUT/evalf_${s}${tag:+_$tag}_$short.log
-  for try in 1 2 3; do
+  for try in 1 2 3 4; do
     [[ -f $json ]] && return 0
     log "evalf: $s $f${tag:+ ($tag)} (try $try)"
-    ( cd "$TV" && PYTHONPATH=$PWD MPLBACKEND=Agg timeout -k 60 "${EVALF_TIMEOUT:-1800}" "${ONE_THREAD[@]}" \
-        "$PY" -W ignore eval_f.py -nw "$NW" ${tag:+--tag "$tag"} "$@" "$f" "$dir" ) >"$logf" 2>&1 \
-      || log "evalf $s $f: exit $? (124 = timed out; see $logf)"
+    ( cd "$TV" && exec env PYTHONPATH="$PWD" MPLBACKEND=Agg timeout -k 60 "${EVALF_TIMEOUT:-14400}" \
+        "${ONE_THREAD[@]}" "$PY" -W ignore eval_f.py -nw "$NW" ${tag:+--tag "$tag"} "$@" "$f" "$dir" ) \
+      >"$logf" 2>&1 &
+    pid=$! last=0 idle=0      # after exec this pid is timeout's, which leads its own process group
+    while kill -0 "$pid" 2>/dev/null; do
+      sleep 30
+      if [[ -f $json ]]; then                      # results written: give it a minute to exit, then stop it
+        sleep 60; kill -0 "$pid" 2>/dev/null && kill -TERM -- "-$pid" 2>/dev/null; break
+      fi
+      cpu=$(group_cpu "$pid")
+      [[ -n $cpu ]] || continue                    # ps cannot read the group: rely on the outer timeout
+      if (( last > 0 && cpu <= last )); then idle=$((idle + 1)); else idle=0; fi
+      last=$cpu
+      if (( idle >= 4 )); then
+        log "evalf $s $f: no CPU use for 2 min, killing the hung run"
+        kill -TERM -- "-$pid" 2>/dev/null; sleep 10; kill -KILL -- "-$pid" 2>/dev/null; break
+      fi
+    done
+    wait "$pid" 2>/dev/null || log "evalf $s $f: exit $? (124 = outer timeout, 143/137 = stopped; see $logf)"
   done
-  [[ -f $json ]] || { log "evalf $s $f${tag:+ ($tag)}: no results after 3 tries"; return 1; }
+  [[ -f $json ]] || { log "evalf $s $f${tag:+ ($tag)}: no results after 4 tries"; return 1; }
 }
 
 step_evalf() {

@@ -515,6 +515,8 @@ def polish_pair(x1, x2, f0, R0, t0):
         E = np.cross(np.eye(3), t) @ R                      # [t]_x R
         return np.einsum("ni,ij,nj->n", r2, E, r1) / np.linalg.norm(r1, axis=1) / np.linalg.norm(r2, axis=1)
 
+    if not np.isfinite(res(np.zeros(6))).all():
+        return None
     sol = least_squares(res, np.zeros(6), method="lm", xtol=1e-15, ftol=1e-15, gtol=1e-15, max_nfev=50)
     if not np.isfinite(sol.x).all() or np.abs(res(sol.x)).max() > 1e-12:
         return None
@@ -556,6 +558,8 @@ def p3p(Xc, x3, f):
             C = Xc @ (Rotation.from_rotvec(q[:3]).as_matrix() @ R0).T + t0 + q[3:]
             return (f * C[:, :2] / C[:, 2:] - x3).ravel()
 
+        if not np.isfinite(res(np.zeros(6))).all():         # e.g. a point on the camera plane (OpenCV 5.0)
+            continue
         sol = least_squares(res, np.zeros(6), method="lm", xtol=1e-15, ftol=1e-15, gtol=1e-15, max_nfev=50)
         if np.abs(res(sol.x)).max() < 1e-12:
             out.append((Rotation.from_rotvec(sol.x[:3]).as_matrix() @ R0, t0 + sol.x[3:]))

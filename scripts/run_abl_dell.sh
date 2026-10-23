@@ -27,6 +27,7 @@
 # Env: SSD=/media/$USER/SSD/learning-algo-cvpr  NSHARDS=<processes for killB, default nproc - 2>
 #      KB_N=<max samples per killB process, default all>  PY=<python, default .venv/bin/python>
 #      THETA=2.0 (inlier px at 800 px)  UNDISTORT=1 (undistort Cambridge keypoints with the NVM radial terms)
+#      EVALF_TIMEOUT=1800 (seconds before a silent eval_f.py run is killed and retried)
 set -uo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$PWD
@@ -146,10 +147,18 @@ step_evalf() {
     s=$(basename "$dir")
     for f in "$FEAT" "$SIFT"; do
       [[ -f $dir/$f.txt ]] || continue
-      [[ -f $TV/results/focal_$s-$f.json ]] && continue
-      log "evalf: $s $f"
-      ( cd "$TV" && PYTHONPATH=$PWD MPLBACKEND=Agg "${ONE_THREAD[@]}" "$PY" -W ignore eval_f.py -nw "$NW" "$f" "$dir" ) \
-        >"$OUT/evalf_${s}_${f%%-*}.log" 2>&1 || log "evalf $s $f failed (see $OUT/evalf_${s}_${f%%-*}.log)"
+      # eval_f.py forks a Pool it never closes, and on abl-dell a run sometimes froze for good after its work
+      # (St Mary's, 2026-10-22). A run that writes no results file within EVALF_TIMEOUT is killed with its
+      # workers (timeout signals the whole process group) and retried, at most three tries.
+      local try
+      for try in 1 2 3; do
+        [[ -f $TV/results/focal_$s-$f.json ]] && break
+        log "evalf: $s $f (try $try)"
+        ( cd "$TV" && PYTHONPATH=$PWD MPLBACKEND=Agg timeout -k 60 "${EVALF_TIMEOUT:-1800}" "${ONE_THREAD[@]}" \
+            "$PY" -W ignore eval_f.py -nw "$NW" "$f" "$dir" ) >"$OUT/evalf_${s}_${f%%-*}.log" 2>&1 \
+          || log "evalf $s $f: exit $? (124 = timed out; see $OUT/evalf_${s}_${f%%-*}.log)"
+      done
+      [[ -f $TV/results/focal_$s-$f.json ]] || log "evalf $s $f: no results after 3 tries"
     done
   done < <(finished_dirs)
 }

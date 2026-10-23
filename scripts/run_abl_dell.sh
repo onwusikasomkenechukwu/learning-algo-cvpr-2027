@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Everything the week-2 plan needs from abl-dell, in one command (student instructions v5):
 #   setup      git pull, threeview patches (CPU, eval options), LightGlue weights from the SSD, import checks,
-#              smoke test
+#              smoke test, and a fork rebuild when the OOB fixes or the refit are missing (fork_build.log)
 #   machine    Task 1.3 machine sheet (scripts/machine_sheet.sh -> results/abl_dell/machine_sheet.md)
 #   monodromy  Task 1.8 solution count on two more instances (background, ~2 h each, one core each)
 #   triplets   Task 1.6 Cambridge SP+LG triplets for the scenes not finished on the laptop (resumable)
@@ -16,6 +16,8 @@
 #   eth3d      ETH3D SP+LG triplets (12 scenes, every qualifying triplet, 800 px), filtered to one
 #              intrinsics block per triplet (Tasks 1.4 / 1.6)
 #   compare    pooled shared-focal tables per dataset and feature (scripts/compare_tzamos_focal.py)
+#   requeue    (not default) move results computed before the OOB fix aside so evalf / killA / control rerun
+#   crashdebug replay saved poselib crashes under gdb -> results/abl_dell/crash_report.txt (native backtraces)
 #   collect    copy results to the SSD (abl_dell_results/) so the laptop can read them
 # The default list runs eth3d after the Cambridge work and repeats sift / evalf for ETH3D afterwards.
 # Not in the default list:
@@ -69,6 +71,11 @@ finished_dirs() {   # "<triplet dir> <image root>" for every scene with finished
   for s in "${ETH_SCENES[@]}"; do eth_done "$s" && echo "$ETRIP/$s $ETH/$s/images"; done
 }
 
+fork_current() {   # the built fork carries every source edit of scripts/build_seed_code.sh
+  local src=$ROOT/third_party/PoseLib-threeview/PoseLib/robust/estimators/relative_pose.cc
+  grep -q "OOB fix" "$src" 2>/dev/null && grep -q "Two-view refit (kill test A" "$src" 2>/dev/null
+}
+
 step_setup() {
   [[ -d $SSD/data/cambridge ]] || die "SSD not found at $SSD (plug it in, or set SSD=...)"
   git pull --ff-only || log "git pull failed; continuing with the local checkout"
@@ -89,6 +96,12 @@ step_setup() {
     || die "python imports"
   OMP_NUM_THREADS=1 "$PY" -W ignore src/homotopy_proto.py --n 3 --noise 0.5 --out "$OUT/smoke" >/dev/null \
     || die "prototype smoke test"
+  if ! fork_current; then   # out-of-bounds fixes and the kill test A refit (scripts/patches/poselib_*.py)
+    log "setup: rebuilding the PoseLib fork with the OOB fixes and the refit (log $OUT/fork_build.log)"
+    ONLY=poselib bash scripts/build_seed_code.sh >"$OUT/fork_build.log" 2>&1 && fork_current \
+      && log "setup: fork rebuilt" \
+      || log "setup: fork rebuild FAILED (see $OUT/fork_build.log); the old poselib stays installed"
+  fi
   log "setup ok"
 }
 
@@ -158,8 +171,11 @@ run_evalf() {   # run_evalf <triplet dir> <feature> <tag or ""> [eval_f.py optio
   for try in 1 2 3 4; do
     [[ -f $json ]] && return 0
     log "evalf: $s $f${tag:+ ($tag)} (try $try)"
-    ( cd "$TV" && exec env PYTHONPATH="$PWD" MPLBACKEND=Agg timeout -k 60 "${EVALF_TIMEOUT:-14400}" \
-        "${ONE_THREAD[@]}" "$PY" -W ignore eval_f.py -nw "$NW" ${tag:+--tag "$tag"} "$@" "$f" "$dir" ) \
+    # eval_f_safe.py runs eval_f.py unchanged with a pool that survives poselib crashes (general protection
+    # faults on some Great Court / St Mary's triplets) and saves each crashing task for crashdebug.
+    ( cd "$TV" && exec env PYTHONPATH="$PWD" MPLBACKEND=Agg EVALF_CRASH_DIR="$OUT/crashes/${s}${tag:+_$tag}_$short" \
+        timeout -k 60 "${EVALF_TIMEOUT:-14400}" "${ONE_THREAD[@]}" \
+        "$PY" -W ignore "$ROOT/scripts/eval_f_safe.py" -nw "$NW" ${tag:+--tag "$tag"} "$@" "$f" "$dir" ) \
       >"$logf" 2>&1 &
     pid=$! last=0 idle=0      # after exec this pid is timeout's, which leads its own process group
     while kill -0 "$pid" 2>/dev/null; do
@@ -194,12 +210,7 @@ step_evalf() {
 step_killA() {
   # Kill test A (Tasks 1.9 / 2.2): the mean-point family with the two-view refit ('+ ENM') against 6pt+P3P on
   # the five Cambridge scenes. The fork is rebuilt once with scripts/patches/poselib_shared_focal_refit.py.
-  local src=$ROOT/third_party/PoseLib-threeview/PoseLib/robust/estimators/relative_pose.cc
-  if ! grep -q "Two-view refit (kill test A" "$src" 2>/dev/null; then
-    log "killA: rebuilding the PoseLib fork with the two-view refit (log $OUT/killA_build.log)"
-    ONLY=poselib bash scripts/build_seed_code.sh >"$OUT/killA_build.log" 2>&1 \
-      || { log "killA: fork rebuild FAILED (see $OUT/killA_build.log); kill test A skipped"; return; }
-  fi
+  fork_current || { log "killA: the fork lacks the refit (see setup); kill test A skipped"; return; }
   "$PY" scripts/patches/threeview_enm.py "$TV" || { log "killA: could not map '+ ENM' in eval_f.py"; return; }
   local exps="4p3v(M) + ENM;4p3v(M) + R + ENM;4p3v(M) + R + C + ENM;4p3v(M-D) + ENM;4p3v(M-D) + R + ENM;4p3v(M-D) + R + C + ENM"
   local s
@@ -234,6 +245,33 @@ step_killB() {
   "$PY" -W ignore src/homotopy_proto.py --merge "${files[@]}" --out "$OUT/killB" | tee "$OUT/killB.txt"
 }
 
+step_requeue() {
+  # Results computed before the OOB fix (every '+ R' row used an undefined fifth point) are moved aside so the
+  # next run recomputes them: eval_f.py / eval.py results, kill test A, the control row.
+  local dst=$TV/results/before_oob_fix_$(date +%Y%m%d_%H%M)
+  mkdir -p "$dst"
+  mv "$TV"/results/focal_*.json "$TV"/results/kill_test_a-*.json "$TV"/results/*-control-*.json "$dst/" 2>/dev/null
+  rm -f "$OUT/control.done" "$OUT/killA.txt"
+  log "requeue: moved $(ls "$dst" | wc -l) result files to $dst; evalf, killA and control will rerun"
+}
+
+step_crashdebug() {
+  # Replay up to CRASH_N saved crashing tasks under gdb (native backtrace) and summarize all crash logs.
+  local rep=$OUT/crash_report.txt n=0 item
+  {
+    echo "== crash logs ($(date '+%F %T'))"
+    cat "$OUT"/crashes/*/crashes.jsonl 2>/dev/null | cut -c1-400 || echo "no crashes logged"
+    for item in "$OUT"/crashes/*/item_*.pkl; do
+      [[ -f $item ]] || continue
+      (( n++ < ${CRASH_N:-3} )) || break
+      echo; echo "== replay $item"
+      ( cd "$TV" && PYTHONPATH="$PWD" timeout 600 "$PY" -W ignore "$ROOT/scripts/poselib_crash_repro.py" \
+          $(command -v gdb >/dev/null && echo --gdb) "$item" ) 2>&1 | tail -60
+    done
+  } >"$rep" 2>&1
+  log "crash report: $rep ($(cat "$OUT"/crashes/*/crashes.jsonl 2>/dev/null | wc -l) crashing tasks logged)"
+}
+
 step_control() {
   [[ -f $OUT/control.done ]] && { log "control row already done"; return; }
   "${ONE_THREAD[@]}" bash scripts/run_tzamos_table.sh --exps "5p3v + R + C" --tag control >"$OUT/control.log" 2>&1 \
@@ -263,7 +301,12 @@ step_collect() {
   cp -r "$OUT" "$dst/" 2>/dev/null
   cp -r "$ROOT/results/killB" "$dst/" 2>/dev/null
   cp "$TV"/results/focal_*.json "$TV"/results/kill_test_a-*.json "$TV"/results/*-control-*.json "$ROOT"/results/runtime_1core_*.txt "$dst/" 2>/dev/null
-  log "copied results to $dst"
+  # Flush to the SSD before saying it is done: on 2026-10-23 the SSD was unplugged right after a copy and all
+  # 669 copied files arrived empty (data still in the write cache). Then check that nothing came out empty.
+  sync -f "$dst" 2>/dev/null || sync
+  local empty
+  empty=$(find "$dst" -type f -size 0 ! -name control.done ! -name runner.pid 2>/dev/null | wc -l)
+  log "copied results to $dst and flushed to disk ($empty empty files); eject the SSD before unplugging it"
 }
 
 step_status() {
@@ -279,7 +322,8 @@ step_status() {
     eth_done "$s" && { n_eth=$((n_eth + 1)); n_trip=$((n_trip + $(nlines "$ETRIP/$s/$FEAT.txt"))); }
   done
   echo "ETH3D: $n_eth/${#ETH_SCENES[@]} scenes, $n_trip same-camera triplets"
-  echo "control row: $([[ -f $OUT/control.done ]] && echo done || echo -)"
+  echo "control row: $([[ -f $OUT/control.done ]] && echo done || echo -)   poselib crashes logged:" \
+       "$(cat "$OUT"/crashes/*/crashes.jsonl 2>/dev/null | wc -l)"
   local last newest=""
   for last in "$OUT/triplets.log" "$OUT"/evalf_*.log "$OUT/eth3d.log"; do   # progress bar of the newest job
     [[ -f $last && ( -z $newest || $last -nt $newest ) ]] && newest=$last
@@ -297,7 +341,7 @@ step_status() {
 }
 
 STEPS=("$@")
-(( ${#STEPS[@]} )) || STEPS=(setup machine monodromy triplets sift evalf killB killA control eth3d sift evalf compare collect)
+(( ${#STEPS[@]} )) || STEPS=(setup machine monodromy triplets sift evalf killB killA control eth3d sift evalf compare crashdebug collect)
 for st in "${STEPS[@]}"; do
   declare -F "step_$st" >/dev/null || die "unknown step: $st"
   [[ $st == status ]] || log "== $st"

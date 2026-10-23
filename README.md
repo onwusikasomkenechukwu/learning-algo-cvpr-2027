@@ -52,6 +52,24 @@ would need a gap of 4.5 or more on its own to change the decision.
   bottleneck; sample conditioning is.
 - **2-view baseline:** PoseLib 5pt LO-RANSAC, mAA@10 0.767 (tutorial val) / 0.709 (test, rebuilt GT).
 
+## The study: Tasks 2.8 and 2.9
+- **Task 2.9, sequential baseline** (`6p3v + SEQ` in `eval_f.py`): shared-focal six-point LO-RANSAC on views 1–2,
+  P3P LO-RANSAC on view 3 against the stage-1 inliers triangulated at the stage-1 focal length, then the joint
+  estimator's final three-view refinement; same threshold, iteration limits and stopping rule in both stages.
+  Added to the PoseLib fork in C++ ([`scripts/patches/poselib_sequential.py`](scripts/patches/poselib_sequential.py))
+  with a Python binding, timed by `eval_f.py` like every other method.
+- **Task 2.8, where outliers sit** ([`scripts/outlier_stats.py`](scripts/outlier_stats.py)): every track labelled
+  against the reference cameras as correct in views 1–2 (fraction a), inlier (fraction b of those, w = ab) and
+  outlier type (whole-track, view-3, single-view), at 2 and 4 px; histograms per scene and matcher, the guard and
+  the low-inlier SIFT set, and the outlier mixture on the tuning scene. First look on 200 triplets per Cambridge
+  scene: SP+LG median w 0.84–0.94, SIFT median w 0.02–0.12, and 45% of SIFT triplets pass the guard with w < 0.4.
+- **Task 2.8, success rates and crossovers** ([`scripts/success_rates.py`](scripts/success_rates.py),
+  [`scripts/crossovers.py`](scripts/crossovers.py)): s_6, s_M, s_E and hypothesis counts from clean samples of the
+  tuning scene, then the draft's cost model (Eqs. 3–4) gives predicted crossover inlier ratios against 6pt+P3P,
+  4p3vf(M) and the sequential pipeline for each outlier type, bracketed by tracking cost and written dated. In a
+  King's College test, local optimization from the reference cameras itself meets the 2°/10% criterion on only
+  55% of triplets, and continuation endpoints never rescued a sample whose seeds all failed (s_E = 0).
+
 ## Known issues in the seed code (fixed here)
 - **Out-of-bounds read in PoseLib@threeview's `inner_refine`** (both three-view estimators): it copies
   `sample[k]` for k < 4 + `inner_refine_extra` (default 1), but a 4p3v sample holds 4 entries, so every '+R'
@@ -78,8 +96,8 @@ bash scripts/run_abl_dell.sh status     # one-screen progress summary
 Steps (each skips work already done; name steps to run only those): `setup` (patches, fork rebuild when a
 source fix is missing, import checks), `machine` (Task 1.3 machine sheet), `monodromy`, `triplets`
 (Cambridge SP+LG, resumable), `sift`, `evalf` (Tzamos et al.'s `eval_f.py` via the crash-safe wrapper),
-`killB`, `killA`, `control` (5pt+P3P+R+F), `eth3d`, `compare`, `crashdebug`, `collect` (copy to the SSD,
-flushed; eject before unplugging). `requeue` moves results computed before the out-of-bounds fix aside so
+`killB`, `killA`, `control` (5pt+P3P+R+F), `eth3d`, `seq` (Task 2.9), `task28` (Task 2.8), `compare`,
+`crashdebug`, `collect` (copy to the SSD, flushed; eject before unplugging). `requeue` moves results computed before the out-of-bounds fix aside so
 they are recomputed.
 
 ## Quick start (new machine)
@@ -126,7 +144,11 @@ scripts/runtime_single_core.sh  main estimators on one pinned core, CPU model re
 scripts/kill_test_a.py          kill test A: 6p3v vs the best re-fitted mean-point variant, two-level bootstrap
 scripts/eval_f_safe.py          run eval_f.py unchanged with a pool that survives poselib crashes
 scripts/poselib_crash_repro.py  replay one saved crashing task (gdb backtrace)
-scripts/patches/poselib_*.py    source edits on the fork at build time: OOB fixes, kill test A two-view refit
+scripts/patches/poselib_*.py    source edits on the fork at build time: OOB fixes, kill test A refit, Task 2.9 sequential
+scripts/patches/threeview_*.py  eval_f.py labels: '+ ENM' (two-view refit), '+ SEQ' (sequential baseline)
+scripts/outlier_stats.py        Task 2.8: track labels a / b / w, outlier types, histograms, guard, low-inlier set
+scripts/success_rates.py        Task 2.8: s_6, s_M, s_E and hypothesis counts on the tuning scene
+scripts/crossovers.py           Task 2.8: predicted crossover inlier ratios from the cost model, dated
 scripts/make_hruby_data.sh      Hruby Sec. 5.1 data split from ETH3D (anchors / val / train)
 scripts/run_baseline.sh         2-view baseline sweep on the RANSAC tutorial val split
 scripts/download_tier1.sh       dataset downloads (online machine)

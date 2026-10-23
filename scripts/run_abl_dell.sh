@@ -12,7 +12,9 @@
 #              decision (continuation >= LM + 5 pp, McNemar p < 0.05)
 #   killA      Kill test A: rebuild the fork with the shared-focal two-view refit, run the re-fitted mean-point
 #              rows ('+ ENM') per Cambridge scene, decide (best re-fitted variant trails 6p3v by >= 2.0 AUC@10)
-#   seq        Task 2.9 sequential baseline ('6p3v + SEQ') per Cambridge scene, next to 6pt+P3P
+#   seq        Task 2.9 sequential baseline ('6p3v + SEQ') per finished scene, next to 6pt+P3P
+#   task28     Task 2.8 outlier labels / histograms / low-inlier set / mixture, success rates on courtyard,
+#              predicted crossovers (results/task28/predictions_{tracking,free}.md)
 #   control    5pt+P3P+R+F control row (eval.py '5p3v + R + C') on the released triplets, own results file
 #   eth3d      ETH3D SP+LG triplets (12 scenes, every qualifying triplet, 800 px), filtered to one
 #              intrinsics block per triplet (Tasks 1.4 / 1.6)
@@ -280,15 +282,37 @@ step_seq() {
   # Task 2.9: the sequential baseline ('6p3v + SEQ': six-point LO-RANSAC on views 1-2, P3P LO-RANSAC on view 3,
   # three-view refinement) through eval_f.py next to 6pt+P3P, SP+LG and SIFT, every finished Cambridge scene.
   fork_current || { log "seq: the fork lacks the sequential baseline (see setup); skipped"; return; }
-  local s f
-  for s in "${SCENES[@]}"; do
-    cam_done "$s" || continue
+  local dir img f
+  while read -r dir img; do      # Cambridge and finished ETH3D scenes (courtyard gives Task 2.8 its timing)
     for f in "$FEAT" "$SIFT"; do
-      [[ -f $TRIP/$s/$f.txt ]] && { run_evalf "$TRIP/$s" "$f" seq --exps "6p3v + SEQ" || true; }
+      [[ -f $dir/$f.txt ]] && { run_evalf "$dir" "$f" seq --exps "6p3v + SEQ" || true; }
     done
-  done
+  done < <(finished_dirs)
   { "$PY" scripts/compare_tzamos_focal.py "$TV/results" --feat "$FEAT" --tag seq
     "$PY" scripts/compare_tzamos_focal.py "$TV/results" --feat "$FEAT"; } 2>&1 | tee "$OUT/seq.txt"
+}
+
+step_task28() {
+  # Task 2.8: outlier labels, histograms, guard and low-inlier set, outlier mixture (all scenes); success rates
+  # on the tuning scene (courtyard); predicted crossovers bracketed by tracking cost (prototype time vs free).
+  local t28=$ROOT/results/task28
+  mkdir -p "$t28"
+  "$PY" -W ignore scripts/outlier_stats.py --cambridge "$TRIP" --nvm-root "$CAM" --eth3d "$ETRIP" \
+    --out "$t28" >"$OUT/task28_outliers.log" 2>&1 || { log "task28: outlier_stats failed (see log)"; return; }
+  tail -2 "$OUT/task28_outliers.log"
+  eth_done courtyard || { log "task28: courtyard triplets missing (eth3d step); success rates and crossovers skipped"; return; }
+  [[ -f $t28/success.json ]] || OMP_NUM_THREADS=1 "$PY" -W ignore scripts/success_rates.py \
+      --scene "$ETRIP/courtyard" --n "${T28_N:-500}" --out "$t28/success.json" >"$OUT/task28_success.log" 2>&1 \
+    || { log "task28: success_rates failed (see $OUT/task28_success.log)"; return; }
+  tail -2 "$OUT/task28_success.log"
+  local mode
+  for mode in tracking free; do
+    "$PY" scripts/crossovers.py --success "$t28/success.json" --outliers "$t28/summary.json" \
+      --results "$TV/results" --scene courtyard $([[ $mode == free ]] && echo --track-ms 0) \
+      --out "$t28/predictions_$mode" >"$OUT/task28_crossovers_$mode.log" 2>&1 \
+      || log "task28: crossovers ($mode) failed (see $OUT/task28_crossovers_$mode.log)"
+  done
+  log "task28: predictions in $t28/predictions_{tracking,free}.md (copy them into the lab notebook, dated)"
 }
 
 step_control() {
@@ -318,7 +342,7 @@ step_collect() {
   local dst=$SSD/abl_dell_results
   mkdir -p "$dst"
   cp -r "$OUT" "$dst/" 2>/dev/null
-  cp -r "$ROOT/results/killB" "$dst/" 2>/dev/null
+  cp -r "$ROOT/results/killB" "$ROOT/results/task28" "$dst/" 2>/dev/null
   cp "$TV"/results/focal_*.json "$TV"/results/kill_test_a-*.json "$TV"/results/*-control-*.json "$ROOT"/results/runtime_1core_*.txt "$dst/" 2>/dev/null
   # Flush to the SSD before saying it is done: on 2026-10-23 the SSD was unplugged right after a copy and all
   # 669 copied files arrived empty (data still in the write cache). Then check that nothing came out empty.
@@ -352,6 +376,9 @@ step_status() {
   [[ -f $OUT/killB.txt ]] && tail -1 "$OUT/killB.txt"
   [[ -f $OUT/killA.txt ]] && grep -a "KILL TEST A\|WARNING" "$OUT/killA.txt"
   [[ -f $OUT/seq.txt ]] && grep -a -E "^(6p3v|6p3v \+ SEQ) " "$OUT/seq.txt" | sed "s/^/Task 2.9: /"
+  [[ -f $OUT/task28_outliers.log ]] && grep -a "guarded SIFT" "$OUT/task28_outliers.log" | sed "s/^/Task 2.8: /"
+  [[ -f $OUT/task28_success.log ]] && grep -a "^ceiling" "$OUT/task28_success.log" | sed "s/^/Task 2.8: /"
+  ls "$ROOT"/results/task28/predictions_*.md 2>/dev/null | sed "s/^/Task 2.8 predictions: /"
   echo "== last log lines"; tail -4 "$OUT/run.log" 2>/dev/null
   if [[ -f $OUT/runner.pid ]] && kill -0 "$(cat "$OUT/runner.pid")" 2>/dev/null; then
     echo "runner: RUNNING"
@@ -361,7 +388,7 @@ step_status() {
 }
 
 STEPS=("$@")
-(( ${#STEPS[@]} )) || STEPS=(setup machine monodromy triplets sift evalf killB killA seq control eth3d sift evalf compare crashdebug collect)
+(( ${#STEPS[@]} )) || STEPS=(setup machine monodromy triplets sift evalf killB killA control eth3d sift evalf seq task28 compare crashdebug collect)
 for st in "${STEPS[@]}"; do
   declare -F "step_$st" >/dev/null || die "unknown step: $st"
   [[ $st == status ]] || log "== $st"

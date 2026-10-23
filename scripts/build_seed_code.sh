@@ -39,6 +39,7 @@ grep -q "DEVICE = " "$TP/threeview/datasets/prepare_im.py" \
   || patch -d "$TP/threeview" -p1 --forward < scripts/patches/threeview-cpu.patch
 grep -q -- "--exps" "$TP/threeview/eval_f.py" \
   || patch -d "$TP/threeview" -p1 --forward < scripts/patches/threeview-eval.patch
+"$PY" scripts/patches/threeview_enm.py "$TP/threeview"   # '+ ENM' -> two-view refit in eval_f.py
 rm -f "$TP"/threeview/*.rej "$TP"/threeview/*/*.rej "$TP"/threeview/*.orig "$TP"/threeview/*/*.orig
 unpack "wheelhouse/src/superansac-*.tar.gz" superansac
 # Eigen 3.4 is header-only but ships its CMake config only after configuring; do that once.
@@ -50,6 +51,7 @@ EIGEN_ARGS=(-DEigen3_DIR="$TP/eigen/build" -DEIGEN3_INCLUDE_DIR="$TP/eigen")
 # compiler's default include path so <Eigen/Core> resolves regardless.
 export CPATH="$TP/eigen${CPATH:+:$CPATH}"
 
+if [[ ${ONLY:-} != poselib ]]; then   # ONLY=poselib rebuilds just the fork (e.g. after a patch change)
 echo "== learning_minimal"
 for p in 4p3v 5p2v; do
   # CMakeLists asks for CMake 2.8; CMake 4 needs an explicit policy floor to accept it.
@@ -57,6 +59,7 @@ for p in 4p3v 5p2v; do
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 "${EIGEN_ARGS[@]}"
   cmake --build "$TP/learning_minimal/$p/build" -j "$JOBS"
 done
+fi
 
 echo "== PoseLib@threeview (python package, links libtorch)"
 # Always start from the pristine pinned source so the patch applies exactly (and fails loudly if not);
@@ -64,6 +67,7 @@ echo "== PoseLib@threeview (python package, links libtorch)"
 rm -rf "$TP/PoseLib-threeview"
 unpack "wheelhouse/src/PoseLib-*.tar.gz" PoseLib-threeview
 patch -d "$TP/PoseLib-threeview" -p1 --forward < scripts/patches/poselib-threeview.patch
+"$PY" scripts/patches/poselib_shared_focal_refit.py "$TP/PoseLib-threeview"   # kill test A two-view refit
 # setup.py only forwards Python_EXECUTABLE to CMake; the patched CMakeLists find torch and pybind11
 # through that interpreter. --no-cache: uv would otherwise reuse a wheel built from an older patch.
 ( cd "$TP/PoseLib-threeview" && \
@@ -71,7 +75,9 @@ patch -d "$TP/PoseLib-threeview" -p1 --forward < scripts/patches/poselib-threevi
 "$PY" -c "import poselib; print('poselib (threeview fork) ok:', poselib.__file__, [n for n in dir(poselib) if 'three' in n.lower() or '3v' in n.lower()][:8])"
 
 echo "== superansac"
-if [[ -d /usr/include/opencv4 ]] && compgen -G "/usr/lib/*/cmake/boost_system-*/boost_system-config.cmake" >/dev/null; then
+if [[ ${ONLY:-} == poselib ]]; then
+  echo "SKIP (ONLY=poselib)"
+elif [[ -d /usr/include/opencv4 ]] && compgen -G "/usr/lib/*/cmake/boost_system-*/boost_system-config.cmake" >/dev/null; then
   cmake -S "$TP/superansac" -B "$TP/superansac/build" -G Ninja -DCMAKE_BUILD_TYPE=Release "${EIGEN_ARGS[@]}" \
     -DPython_EXECUTABLE="$PY" -Dpybind11_DIR="$("$PY" -m pybind11 --cmakedir)"
   cmake --build "$TP/superansac/build" -j "$JOBS"

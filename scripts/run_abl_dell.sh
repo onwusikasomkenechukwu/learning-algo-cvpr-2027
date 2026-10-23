@@ -10,6 +10,8 @@
 #              finished scene and feature type; one run each (eval_f.py has no RANSAC seed option)
 #   killB      Kill test B on SP+LG all-inlier samples, one per triplet, sharded over all cores, then the
 #              decision (continuation >= LM + 5 pp, McNemar p < 0.05)
+#   killA      Kill test A: rebuild the fork with the shared-focal two-view refit, run the re-fitted mean-point
+#              rows ('+ ENM') per Cambridge scene, decide (best re-fitted variant trails 6p3v by >= 2.0 AUC@10)
 #   control    5pt+P3P+R+F control row (eval.py '5p3v + R + C') on the released triplets, own results file
 #   eth3d      ETH3D SP+LG triplets (12 scenes, every qualifying triplet, 800 px), filtered to one
 #              intrinsics block per triplet (Tasks 1.4 / 1.6)
@@ -19,7 +21,6 @@
 # Not in the default list:
 #   thresh     Task 2.1 step 1 / Task 1.5: the Tzamos table at threshold 1.0 on every released scene (long)
 #   runtime    single-core timing (scripts/runtime_single_core.sh): only in the booked timing window
-# Not possible yet: the kill test A re-fit (ENM-like) for the shared-focal estimator needs new C++ in the fork.
 #
 #   bash scripts/run_abl_dell.sh               # default steps, in the background; prints how to check
 #   bash scripts/run_abl_dell.sh status        # one-screen progress summary (take a photo of this)
@@ -140,27 +141,51 @@ step_sift() {
   done < <(finished_dirs)
 }
 
+run_evalf() {   # run_evalf <triplet dir> <feature> <tag or ""> [eval_f.py options...]
+  # eval_f.py forks a Pool it never closes, and on abl-dell a run sometimes froze for good after its work
+  # (St Mary's, 2026-10-22). A run that writes no results file within EVALF_TIMEOUT is killed with its
+  # workers (timeout signals the whole process group) and retried, at most three tries.
+  local dir=$1 f=$2 tag=$3 s try; shift 3
+  s=$(basename "$dir")
+  local json=$TV/results/focal_$s${tag:+-$tag}-$f.json logf=$OUT/evalf_${s}${tag:+_$tag}_${f%%-*}.log
+  for try in 1 2 3; do
+    [[ -f $json ]] && return 0
+    log "evalf: $s $f${tag:+ ($tag)} (try $try)"
+    ( cd "$TV" && PYTHONPATH=$PWD MPLBACKEND=Agg timeout -k 60 "${EVALF_TIMEOUT:-1800}" "${ONE_THREAD[@]}" \
+        "$PY" -W ignore eval_f.py -nw "$NW" ${tag:+--tag "$tag"} "$@" "$f" "$dir" ) >"$logf" 2>&1 \
+      || log "evalf $s $f: exit $? (124 = timed out; see $logf)"
+  done
+  [[ -f $json ]] || { log "evalf $s $f${tag:+ ($tag)}: no results after 3 tries"; return 1; }
+}
+
 step_evalf() {
   mkdir -p "$TV/results"
-  local dir img s f
+  local dir img f
   while read -r dir img; do
-    s=$(basename "$dir")
     for f in "$FEAT" "$SIFT"; do
-      [[ -f $dir/$f.txt ]] || continue
-      # eval_f.py forks a Pool it never closes, and on abl-dell a run sometimes froze for good after its work
-      # (St Mary's, 2026-10-22). A run that writes no results file within EVALF_TIMEOUT is killed with its
-      # workers (timeout signals the whole process group) and retried, at most three tries.
-      local try
-      for try in 1 2 3; do
-        [[ -f $TV/results/focal_$s-$f.json ]] && break
-        log "evalf: $s $f (try $try)"
-        ( cd "$TV" && PYTHONPATH=$PWD MPLBACKEND=Agg timeout -k 60 "${EVALF_TIMEOUT:-1800}" "${ONE_THREAD[@]}" \
-            "$PY" -W ignore eval_f.py -nw "$NW" "$f" "$dir" ) >"$OUT/evalf_${s}_${f%%-*}.log" 2>&1 \
-          || log "evalf $s $f: exit $? (124 = timed out; see $OUT/evalf_${s}_${f%%-*}.log)"
-      done
-      [[ -f $TV/results/focal_$s-$f.json ]] || log "evalf $s $f: no results after 3 tries"
+      [[ -f $dir/$f.txt ]] && run_evalf "$dir" "$f" ""
     done
   done < <(finished_dirs)
+}
+
+step_killA() {
+  # Kill test A (Tasks 1.9 / 2.2): the mean-point family with the two-view refit ('+ ENM') against 6pt+P3P on
+  # the five Cambridge scenes. The fork is rebuilt once with scripts/patches/poselib_shared_focal_refit.py.
+  local src=$ROOT/third_party/PoseLib-threeview/PoseLib/robust/estimators/relative_pose.cc
+  if ! grep -q "Two-view refit (kill test A" "$src" 2>/dev/null; then
+    log "killA: rebuilding the PoseLib fork with the two-view refit (log $OUT/killA_build.log)"
+    ONLY=poselib bash scripts/build_seed_code.sh >"$OUT/killA_build.log" 2>&1 \
+      || { log "killA: fork rebuild FAILED (see $OUT/killA_build.log); kill test A skipped"; return; }
+  fi
+  "$PY" scripts/patches/threeview_enm.py "$TV" || { log "killA: could not map '+ ENM' in eval_f.py"; return; }
+  local exps="4p3v(M) + ENM;4p3v(M) + R + ENM;4p3v(M) + R + C + ENM;4p3v(M-D) + ENM;4p3v(M-D) + R + ENM;4p3v(M-D) + R + C + ENM"
+  local s
+  for s in "${SCENES[@]}"; do
+    cam_done "$s" || { log "killA: skip $s (triplets not finished)"; continue; }
+    run_evalf "$TRIP/$s" "$FEAT" "" || true                      # 6p3v and the plain rows
+    run_evalf "$TRIP/$s" "$FEAT" killA --exps "$exps" || true    # the refitted rows
+  done
+  "$PY" scripts/kill_test_a.py "$TV/results" --feat "$FEAT" | tee "$OUT/killA.txt"
 }
 
 step_killB() {
@@ -214,7 +239,7 @@ step_collect() {
   mkdir -p "$dst"
   cp -r "$OUT" "$dst/" 2>/dev/null
   cp -r "$ROOT/results/killB" "$dst/" 2>/dev/null
-  cp "$TV"/results/focal_*.json "$TV"/results/*-control-*.json "$ROOT"/results/runtime_1core_*.txt "$dst/" 2>/dev/null
+  cp "$TV"/results/focal_*.json "$TV"/results/kill_test_a-*.json "$TV"/results/*-control-*.json "$ROOT"/results/runtime_1core_*.txt "$dst/" 2>/dev/null
   log "copied results to $dst"
 }
 
@@ -239,6 +264,7 @@ step_status() {
   [[ -n $newest ]] && echo "$(basename "$newest"): $(tail -c 400 "$newest" | tr '\r' '\n' | grep -a -v '^\s*$' | tail -1)"
   for r in 8 9; do echo "monodromy rng$r: $(tail -1 "$OUT/monodromy_rng$r.log" 2>/dev/null)"; done
   [[ -f $OUT/killB.txt ]] && tail -1 "$OUT/killB.txt"
+  [[ -f $OUT/killA.txt ]] && grep -a "KILL TEST A\|WARNING" "$OUT/killA.txt"
   echo "== last log lines"; tail -4 "$OUT/run.log" 2>/dev/null
   if [[ -f $OUT/runner.pid ]] && kill -0 "$(cat "$OUT/runner.pid")" 2>/dev/null; then
     echo "runner: RUNNING"
@@ -248,7 +274,7 @@ step_status() {
 }
 
 STEPS=("$@")
-(( ${#STEPS[@]} )) || STEPS=(setup machine monodromy triplets sift evalf killB control eth3d sift evalf compare collect)
+(( ${#STEPS[@]} )) || STEPS=(setup machine monodromy triplets sift evalf killB killA control eth3d sift evalf compare collect)
 for st in "${STEPS[@]}"; do
   declare -F "step_$st" >/dev/null || die "unknown step: $st"
   [[ $st == status ]] || log "== $st"

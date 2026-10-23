@@ -1,25 +1,88 @@
-# learning-algo: learned minimal solvers + RANSAC (CVPR target)
+# learning-algo: minimal solvers + RANSAC for multi-view relative pose
 
-Relative pose baselines, reproductions of the seed papers, and research prototypes for learned minimal
-solvers + RANSAC (calibrated two- and three-view relative pose).
+Evaluation stack, reproductions of the seed papers and research prototypes for minimal solvers inside
+RANSAC: calibrated two- and three-view relative pose, and three-view relative pose with an unknown shared
+focal length (4p3vf).
 
-- **Status, all results and open decisions: [`docs/REPORT.md`](docs/REPORT.md)** (start here)
-- Research brief (seed-paper analysis; its directions are superseded by the plan in the report): [`docs/research_brief.md`](docs/research_brief.md)
-- Setup on a lab workstation: [`docs/WORKSTATION_SETUP.md`](docs/WORKSTATION_SETUP.md);
-  offline cluster (no internet): [`docs/CLUSTER_SETUP.md`](docs/CLUSTER_SETUP.md)
+## Status (2026-10-23)
+The CVPR 2027 plan was single-path homotopy continuation from approximate (mean-point) seeds for 4p3vf.
+**Both pre-registered kill tests failed, so that paper is off.** The work continues as a controlled study of
+when solver exactness matters, starting with the outlier measurements and crossover predictions (Task 2.8)
+and the sequential six-point → P3P baseline (Task 2.9).
 
-## Highlights (2026-10-20)
+| Kill test | Rule | Result |
+|---|---|---|
+| **B**: does continuation reach the correct root more often than converged LM from identical seeds? | ≥ +5 points, McNemar clear | **FAIL**: 15.4% vs 21.3% (−5.9 points), McNemar p = 5e-23, 12,859 all-inlier Cambridge samples (SP+LG); LM ahead in every scene |
+| **A**: does the best re-fitted mean-point variant still trail 6pt+P3P? | ≥ 2.0 AUC@10 | **FAIL**: 1.37 AUC@10 (95% two-level bootstrap [0.85, 1.83]), 4 of 5 Cambridge scenes, one run |
+
+Kill test A, per scene (AUC@10, Cambridge, SuperPoint+LightGlue, 5,000 triplets each):
+
+| Method | King's College | Old Hospital | Shop Facade | St Mary's | Mean |
+|---|---|---|---|---|---|
+| 6pt+P3P (`6p3v`) | 64.50 | 47.69 | 64.86 | 58.24 | **58.83** |
+| 4p3vf(M) | 57.90 | 42.32 | 57.60 | 49.96 | 51.94 |
+| 4p3vf(M±δ)+R (best without re-fit) | 59.19 | 43.33 | 59.25 | 51.29 | 53.26 |
+| **4p3vf(M±δ) + two-view re-fit** (best) | 63.85 | 46.24 | 63.19 | 56.53 | **57.45** |
+
+Great Court is missing because the PoseLib fork crashed on some of its triplets (see *Known issues*); it
+would need a gap of 4.5 or more on its own to change the decision.
+
+**What we learned**
+- **The minimal 4p3vf problem is badly conditioned at real noise.** The exact root that continues the ground
+  truth to the observed points meets a 2°/10%-focal criterion on only about 5% of real samples, and
+  mean-point seeds start a median 40° off. Real continuation paths fold or end at a wrong exact root of the
+  right orientation class, which no check can reject.
+- **A cheap two-view re-fit, not exactness, closes most of the gap.** Re-fitting focal length and pose of
+  views 1–2 on each seed's inliers adds 4–5 AUC@10 to every mean-point variant (gap to 6pt+P3P 5.6 → 1.4).
+- **The equations behave as derived.** Residuals of 3e-15 on 1,000 instances; the Jacobian loses rank by
+  exactly two at coplanar points; the true root keeps its orientation class through 98/98 coplanar
+  crossings; monodromy finds 2,672 = 4 × 668 solutions, stable over three instances (668 per class, as
+  listed by Chien et al.).
+- **The shared-focal baseline reproduces:** on the same four scenes 6pt+P3P leads the mean-point solver by
+  6.89 AUC@10, against 6.91 in Tzamos et al.'s extended paper.
+
+**Earlier results** (details in [`docs/REPORT.md`](docs/REPORT.md), written 2026-10-20)
 - **Tzamos et al. (CVPR 2025) reproduced with their own code:** their best method, 4p3v(M±δ)+R+F+ENM,
-  gets AUC@5 65.99 vs 66.12 in the paper (PhotoTourism); all variants with inner refinement match.
-  Variants without refinement and all Aachen numbers differ systematically from the paper (details in the
-  report).
+  gets AUC@5 65.99 vs 66.12 in the paper (PhotoTourism); variants with inner refinement match within
+  0.1–1.8, variants without it and Aachen differ systematically. These '+R' rows were computed before the
+  out-of-bounds fix below and are being rerun.
 - **Their unpublished learned 5th point:** +14 AUC@5 before refinement, nothing after it, 4–6× slower.
 - **Our learned sample-triage prototype (negative result):** 1.8× fewer draws than random before
   refinement, but ties a one-line spread rule after it (2.88 vs 2.90 draws). Outliers are not the
   bottleneck; sample conditioning is.
 - **2-view baseline:** PoseLib 5pt LO-RANSAC, mAA@10 0.767 (tutorial val) / 0.709 (test, rebuilt GT).
 
-## Quick start
+## Known issues in the seed code (fixed here)
+- **Out-of-bounds read in PoseLib@threeview's `inner_refine`** (both three-view estimators): it copies
+  `sample[k]` for k < 4 + `inner_refine_extra` (default 1), but a 4p3v sample holds 4 entries, so every '+R'
+  method reads `sample[4]` past the end and refines on an arbitrary fifth track, or faults when the junk
+  index is large. On abl-dell this produced general protection faults in poselib (kernel log) and
+  evaluations that never finished. [`scripts/patches/poselib_oob_fixes.py`](scripts/patches/poselib_oob_fixes.py)
+  refines on the sampled tracks only and also fixes a `reserve(3)` that left P3P reading an empty vector.
+  **Every '+R' result computed before the fix used the undefined fifth point.**
+- `eval_f.py` forks a `Pool` it never closes; a crashed worker makes it wait forever.
+  [`scripts/eval_f_safe.py`](scripts/eval_f_safe.py) runs it unchanged with a pool that survives worker
+  crashes, retries the task once and saves it for [`scripts/poselib_crash_repro.py`](scripts/poselib_crash_repro.py)
+  (gdb backtrace).
+- `eval_f.py` scores the focal length against view 1 only (`gt_focal_2/3` read `img1`); the released
+  `ThreeViewSharedFocalRelativePoseEstimator::delta` dehomogenizes the shifted point by its y coordinate.
+  Both left as released and noted.
+
+## Running on abl-dell (no GPU)
+Setup once ([`docs/WORKSTATION_SETUP.md`](docs/WORKSTATION_SETUP.md)), then in `~/learning-algo` with
+`conda activate cvpr` and the data SSD plugged in:
+```bash
+bash scripts/run_abl_dell.sh            # everything below, in the background
+bash scripts/run_abl_dell.sh status     # one-screen progress summary
+```
+Steps (each skips work already done; name steps to run only those): `setup` (patches, fork rebuild when a
+source fix is missing, import checks), `machine` (Task 1.3 machine sheet), `monodromy`, `triplets`
+(Cambridge SP+LG, resumable), `sift`, `evalf` (Tzamos et al.'s `eval_f.py` via the crash-safe wrapper),
+`killB`, `killA`, `control` (5pt+P3P+R+F), `eth3d`, `compare`, `crashdebug`, `collect` (copy to the SSD,
+flushed; eject before unplugging). `requeue` moves results computed before the out-of-bounds fix aside so
+they are recomputed.
+
+## Quick start (new machine)
 On Ubuntu with internet and the data SSD plugged in:
 ```bash
 git clone https://github.com/onwusikasomkenechukwu/learning-algo-cvpr-2027.git ~/learning-algo
@@ -60,6 +123,10 @@ scripts/cambridge_nvm_to_colmap.py  Cambridge reconstruction.nvm -> COLMAP model
 scripts/filter_same_camera.py   keep triplets whose three images share one intrinsics block (ETH3D)
 scripts/compare_tzamos_focal.py pool shared-focal eval_f.py results per dataset (AUC, runtime, focal error)
 scripts/runtime_single_core.sh  main estimators on one pinned core, CPU model recorded (timing window only)
+scripts/kill_test_a.py          kill test A: 6p3v vs the best re-fitted mean-point variant, two-level bootstrap
+scripts/eval_f_safe.py          run eval_f.py unchanged with a pool that survives poselib crashes
+scripts/poselib_crash_repro.py  replay one saved crashing task (gdb backtrace)
+scripts/patches/poselib_*.py    source edits on the fork at build time: OOB fixes, kill test A two-view refit
 scripts/make_hruby_data.sh      Hruby Sec. 5.1 data split from ETH3D (anchors / val / train)
 scripts/run_baseline.sh         2-view baseline sweep on the RANSAC tutorial val split
 scripts/download_tier1.sh       dataset downloads (online machine)

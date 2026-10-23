@@ -38,7 +38,8 @@ def row(rows):
     frac = np.array([np.mean(e < t) for t in range(1, 21)])
     f = np.array([r["f_err"] for r in rows], dtype=float)
     f[np.isnan(f)] = 1.0
-    ms = np.mean([r["info"]["runtime"] for r in rows])
+    ok = [r["info"]["runtime"] for r in rows if not r.get("crashed")]   # crashed rows carry a copied runtime
+    ms = np.mean(ok) if ok else float("nan")
     return [e.mean(), np.median(e), 100 * frac[:5].mean(), 100 * frac[:10].mean(), 100 * frac.mean(), ms,
             100 * np.median(f), 100 * np.mean(f < 0.05), 100 * np.mean(f < 0.10)]
 

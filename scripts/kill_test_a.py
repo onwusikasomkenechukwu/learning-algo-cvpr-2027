@@ -23,10 +23,16 @@ MARGIN = 2.0
 
 
 def errors(rows):
-    e = np.array([max(0.5 * (r["R_12_err"] + r["R_13_err"]), 0.5 * (r["t_12_err"] + r["t_13_err"])) for r in rows],
-                 dtype=float)
-    e[np.isnan(e)] = 180
-    return e
+    """{triplet: pose error} for one experiment; eval_f.py records img1-img3 (position if a row lacks them)."""
+    out = {}
+    for k, r in enumerate(rows):
+        e = max(0.5 * (r["R_12_err"] + r["R_13_err"]), 0.5 * (r["t_12_err"] + r["t_13_err"]))
+        out[(r.get("img1"), r.get("img2"), r.get("img3")) if "img1" in r else k] = 180.0 if np.isnan(e) else e
+    return out
+
+
+def arr(d, keys=None):
+    return np.array([d[k] for k in (keys if keys is not None else d)], dtype=float)
 
 
 def below(e):
@@ -59,29 +65,31 @@ def main():
     missing = sorted(set(SCENES) - set(scenes))
 
     def pooled(exp):
-        return float(np.mean([100 * below(per[exp][s]).mean() for s in scenes]))
+        return float(np.mean([100 * below(arr(per[exp][s])).mean() for s in scenes]))
 
     print(f"Kill test A on {len(scenes)}/{len(SCENES)} Cambridge scenes"
           + (f" (MISSING: {', '.join(missing)})" if missing else "") + f", {args.feat}, one run")
     print(f"{'method':<28}" + "".join(f"{s[:10]:>11}" for s in scenes) + f"{'mean':>9}")
     shown = ["6p3v"] + sorted(e for e in per if e.startswith("4p3v(M") and all(s in per[e] for s in scenes))
     for exp in shown:
-        print(f"{exp:<28}" + "".join(f"{100 * below(per[exp][s]).mean():11.2f}" for s in scenes)
+        print(f"{exp:<28}" + "".join(f"{100 * below(arr(per[exp][s])).mean():11.2f}" for s in scenes)
               + f"{pooled(exp):9.2f}")
 
     for e in enm:   # the refit must change something, or early_nonminimal never reached the estimator
         plain = e.replace(" + ENM", "")
-        if plain in per and all(len(per[plain][s]) == len(per[e][s]) and np.array_equal(per[plain][s], per[e][s])
-                                for s in scenes):
+        if plain in per and all(per[plain][s] == per[e][s] for s in scenes):
             print(f"WARNING: {e} equals {plain} on every triplet: the refit had no effect (check the build)")
 
     best = max(enm, key=pooled)
-    diff = pooled("6p3v") - pooled(best)
-    rng = np.random.default_rng(args.seed)
-    ind = {m: {s: below(per[m][s]) for s in scenes} for m in ("6p3v", best)}
+    # pair 6p3v and the best variant on the triplets both evaluated (all of them unless a run lost some)
+    common = {s: [k for k in per["6p3v"][s] if k in per[best][s]] for s in scenes}
     for s in scenes:
-        if len(ind["6p3v"][s]) != len(ind[best][s]):
-            raise SystemExit(f"{s}: 6p3v has {len(ind['6p3v'][s])} triplets but {best} has {len(ind[best][s])}")
+        if len(common[s]) < max(len(per["6p3v"][s]), len(per[best][s])):
+            print(f"note: {s}: paired on {len(common[s])} triplets (6p3v {len(per['6p3v'][s])}, "
+                  f"{best} {len(per[best][s])})")
+    ind = {m: {s: below(arr(per[m][s], common[s])) for s in scenes} for m in ("6p3v", best)}
+    diff = float(np.mean([100 * (ind["6p3v"][s].mean() - ind[best][s].mean()) for s in scenes]))
+    rng = np.random.default_rng(args.seed)
     boot = np.empty(args.boot)
     for b in range(args.boot):
         d = []

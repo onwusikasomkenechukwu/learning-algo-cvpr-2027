@@ -76,6 +76,10 @@ patch -d "$TP/PoseLib-threeview" -p1 --forward < scripts/patches/poselib-threevi
 ( cd "$TP/PoseLib-threeview" && \
   "$UV" pip install --python "$PY" --offline --no-index --no-build-isolation --no-cache --reinstall-package poselib . )
 "$PY" -c "import poselib; print('poselib (threeview fork) ok:', poselib.__file__, [n for n in dir(poselib) if 'three' in n.lower() or '3v' in n.lower()][:8])"
+"$PY" -c "import poselib; poselib.estimate_three_view_shared_focal_sequential"   # Task 2.9 binding is in
+# Stamp of the fork's source edits, written only after a successful build (scripts/run_abl_dell.sh compares it).
+cat scripts/patches/poselib-threeview.patch scripts/patches/poselib_*.py | sha256sum | cut -c1-16 \
+  >"$TP/PoseLib-threeview/.build_stamp"
 
 echo "== superansac"
 if [[ ${ONLY:-} == poselib ]]; then

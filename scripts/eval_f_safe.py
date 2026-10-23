@@ -1,4 +1,5 @@
-"""Run threeview's eval_f.py unchanged, but with a worker pool that survives crashes inside poselib.
+"""Run threeview's eval_f.py (or eval.py, with EVAL_SCRIPT=eval.py) unchanged, but with a worker pool that
+survives crashes inside poselib.
 
 On abl-dell the PoseLib fork dies with general protection faults on some Great Court / St Mary's triplets
 (kernel log 2026-10-23). eval_f.py's multiprocessing.Pool then waits forever for the dead worker's result.
@@ -98,7 +99,10 @@ class SafePool:
             t = next_task()
             w["task"] = t
             if t is not None:
-                w["conn"].send(t)
+                try:
+                    w["conn"].send(t)
+                except (BrokenPipeError, OSError):   # the worker died meanwhile: its sentinel reports it
+                    pass
             return t is not None
 
         busy = [w for w in workers if feed(w)]
@@ -218,12 +222,15 @@ class SafePool:
         return False
 
 
-def load_eval_f(threeview="."):
+def load_eval_f(threeview=".", script=None):
+    """Load threeview's eval_f.py (or $EVAL_SCRIPT, e.g. eval.py: same structure) as a module."""
+    script = script or os.environ.get("EVAL_SCRIPT", "eval_f.py")
     tv = Path(threeview).resolve()
     sys.path.insert(0, str(tv))
-    spec = importlib.util.spec_from_file_location("eval_f", tv / "eval_f.py")
+    name = Path(script).stem
+    spec = importlib.util.spec_from_file_location(name, tv / script)
     mod = importlib.util.module_from_spec(spec)
-    sys.modules["eval_f"] = mod                       # pickling of module-level functions by name
+    sys.modules[name] = mod                           # pickling of module-level functions by name
     spec.loader.exec_module(mod)
     return mod
 
@@ -231,7 +238,7 @@ def load_eval_f(threeview="."):
 def main():
     mod = load_eval_f(".")
     mod.Pool = SafePool
-    sys.argv = ["eval_f.py"] + sys.argv[1:]
+    sys.argv = [os.environ.get("EVAL_SCRIPT", "eval_f.py")] + sys.argv[1:]
     mod.eval(mod.parse_args())
 
 

@@ -91,14 +91,19 @@ Setup once ([`docs/WORKSTATION_SETUP.md`](docs/WORKSTATION_SETUP.md)), then in `
 `conda activate cvpr` and the data SSD plugged in:
 ```bash
 bash scripts/run_abl_dell.sh            # everything below, in the background
+bash scripts/run_abl_dell.sh fresh      # the same, after moving every earlier result aside (full retest)
 bash scripts/run_abl_dell.sh status     # one-screen progress summary
+bash scripts/run_abl_dell.sh stop       # stop the runner and every job it started
 ```
-Steps (each skips work already done; name steps to run only those): `setup` (patches, fork rebuild when a
-source fix is missing, import checks), `machine` (Task 1.3 machine sheet), `monodromy`, `triplets`
-(Cambridge SP+LG, resumable), `sift`, `evalf` (Tzamos et al.'s `eval_f.py` via the crash-safe wrapper),
-`killB`, `killA`, `control` (5pt+P3P+R+F), `eth3d`, `seq` (Task 2.9), `task28` (Task 2.8), `compare`,
-`crashdebug`, `collect` (copy to the SSD, flushed; eject before unplugging). `requeue` moves results computed before the out-of-bounds fix aside so
-they are recomputed.
+Steps, in default order (each skips work already done; name steps to run only those): `setup` (git pull,
+patches, fork rebuild when the installed fork was not built from the current patches, import checks),
+`machine` (Task 1.3 machine sheet), `monodromy`, `triplets` (Cambridge SP+LG, resumable), `eth3d` (every
+qualifying triplet, at most `ETH_N=2000` per scene), `sift`, `evalf` (Tzamos et al.'s `eval_f.py` via the
+crash-safe wrapper), `killB`, `killA`, `seq` (Task 2.9), `control` (5pt+P3P+R+F), `task28` (Task 2.8),
+`compare`, `crashdebug`, `collect` (copy to the SSD, flushed; eject before unplugging). All datasets are
+built before any evaluation. `fresh` archives earlier results to `results/archive/<time>/` (and
+`third_party/threeview/results/archive_<time>/`, the SSD copy to `abl_dell_results_<time>/`); triplets and
+SIFT tracks are kept.
 
 ## Quick start (new machine)
 On Ubuntu with internet and the data SSD plugged in:

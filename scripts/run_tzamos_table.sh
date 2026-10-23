@@ -23,6 +23,9 @@ for s in "$TRIPLETS"/*/ "$TRIPLETS"/*/*/; do
   [[ -f "$s/$FEAT.h5" ]] || continue
   [[ -z "${ONLY:-}" || $(basename "$s") == *"$ONLY"* ]] || continue
   echo "== $(basename "$s")  $(date +%T)"
-  "$PY" eval.py -nw "$(nproc)" -t 5.0 "${ARGS[@]}" "$FEAT" "$s" 2>>"$HOME/tzamos_stderr.log" | tail -28 || echo "FAILED: $s"
+  # eval.py unchanged, through eval_f_safe.py's crash-tolerant pool (a poselib fault cannot hang the run)
+  EVAL_SCRIPT=eval.py EVALF_CRASH_DIR="$ROOT/results/crashes_eval/$(basename "$s")" MPLBACKEND=Agg \
+    "$PY" "$ROOT/scripts/eval_f_safe.py" -nw "$(nproc)" -t 5.0 "${ARGS[@]}" "$FEAT" "$s" \
+    2>>"$HOME/tzamos_stderr.log" | tail -28 || echo "FAILED: $s"
 done
 echo "== all done  $(date +%T)"

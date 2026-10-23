@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Everything the week-2 plan needs from abl-dell, in one command (student instructions v5):
-#   setup      git pull, threeview patches (CPU, eval options), LightGlue weights from the SSD, import checks,
-#              smoke test, and a fork rebuild when the OOB fixes or the refit are missing (fork_build.log)
+#   fresh      (alone: then every default step) move all earlier results aside and rebuild the fork, so
+#              everything below, the kill tests included, is recomputed on the complete datasets
+#   setup      git pull (restarts the runner if that changed it), threeview patches (CPU, eval options), LightGlue
+#              weights from the SSD, import checks, smoke test, and a fork rebuild when the installed fork was
+#              not built from the current scripts/patches/poselib_* (build stamp; fork_build.log)
 #   machine    Task 1.3 machine sheet (scripts/machine_sheet.sh -> results/abl_dell/machine_sheet.md)
 #   monodromy  Task 1.8 solution count on two more instances (background, ~2 h each, one core each)
 #   triplets   Task 1.6 Cambridge SP+LG triplets for the scenes not finished on the laptop (resumable)
@@ -16,22 +19,26 @@
 #   task28     Task 2.8 outlier labels / histograms / low-inlier set / mixture, success rates on courtyard,
 #              predicted crossovers (results/task28/predictions_{tracking,free}.md)
 #   control    5pt+P3P+R+F control row (eval.py '5p3v + R + C') on the released triplets, own results file
-#   eth3d      ETH3D SP+LG triplets (12 scenes, every qualifying triplet, 800 px), filtered to one
-#              intrinsics block per triplet (Tasks 1.4 / 1.6)
+#   eth3d      ETH3D SP+LG triplets (12 scenes, every qualifying triplet up to ETH_N = 2000 per scene, 800 px),
+#              filtered to one intrinsics block per triplet (Tasks 1.4 / 1.6)
 #   compare    pooled shared-focal tables per dataset and feature (scripts/compare_tzamos_focal.py)
 #   requeue    (not default) move results computed before the OOB fix aside so evalf / killA / control rerun
 #   crashdebug replay saved poselib crashes under gdb -> results/abl_dell/crash_report.txt (native backtraces)
 #   collect    copy results to the SSD (abl_dell_results/) so the laptop can read them
-# The default list runs eth3d after the Cambridge work and repeats sift / evalf for ETH3D afterwards.
+#   stop       stop the background runner and every job it started
+# The default list builds every dataset (triplets, eth3d, sift) before any evaluation.
 # Not in the default list:
 #   thresh     Task 2.1 step 1 / Task 1.5: the Tzamos table at threshold 1.0 on every released scene (long)
 #   runtime    single-core timing (scripts/runtime_single_core.sh): only in the booked timing window
 #
 #   bash scripts/run_abl_dell.sh               # default steps, in the background; prints how to check
+#   bash scripts/run_abl_dell.sh fresh         # the same after moving every earlier result aside
 #   bash scripts/run_abl_dell.sh status        # one-screen progress summary (take a photo of this)
+#   bash scripts/run_abl_dell.sh stop          # stop it all
 #   bash scripts/run_abl_dell.sh killB collect # only these steps
 # Env: SSD=/media/$USER/SSD/learning-algo-cvpr  NSHARDS=<processes for killB, default nproc - 2>
 #      KB_N=<max samples per killB process, default all>  PY=<python, default .venv/bin/python>
+#      ETH_N=2000 (max triplets per ETH3D scene)
 #      THETA=2.0 (inlier px at 800 px)  UNDISTORT=1 (undistort Cambridge keypoints with the NVM radial terms)
 #      EVALF_TIMEOUT=14400 (outer bound per eval_f.py run; hung, idle runs are killed after 2 min by a watchdog)
 set -uo pipefail
@@ -56,7 +63,12 @@ NW=$(( $(nproc) - 2 ))   # leave two cores for interactive work (ground rule 6)
 ONE_THREAD=(env OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1)
 mkdir -p "$OUT"
 
-if [[ ${1:-} != status && -z ${ABL_BG:-} ]]; then
+if [[ ${1:-} != status && ${1:-} != stop && -z ${ABL_BG:-} ]]; then
+  old=$(cat "$OUT/runner.pid" 2>/dev/null)
+  if [[ -n $old ]] && grep -qa run_abl_dell "/proc/$old/cmdline" 2>/dev/null; then
+    echo "a runner is already going (pid $old); stop it first:  bash scripts/run_abl_dell.sh stop"
+    exit 1
+  fi
   ABL_BG=1 nohup bash "$ROOT/scripts/run_abl_dell.sh" "$@" >>"$OUT/run.log" 2>&1 &
   echo $! >"$OUT/runner.pid"
   echo "started in the background (pid $!), log: $OUT/run.log"
@@ -74,15 +86,25 @@ finished_dirs() {   # "<triplet dir> <image root>" for every scene with finished
   for s in "${ETH_SCENES[@]}"; do eth_done "$s" && echo "$ETRIP/$s $ETH/$s/images"; done
 }
 
-fork_current() {   # the built fork carries every source edit of scripts/build_seed_code.sh
-  local src=$ROOT/third_party/PoseLib-threeview/PoseLib/robust/estimators/relative_pose.cc
-  grep -q "OOB fix" "$src" 2>/dev/null && grep -q "Two-view refit (kill test A" "$src" 2>/dev/null \
-    && grep -q "estimate_3v_shared_focal_sequential" "$ROOT/third_party/PoseLib-threeview/PoseLib/robust.cc" 2>/dev/null
+fork_current() {   # the installed fork was built from the current patches (stamp written by build_seed_code.sh)
+  local want
+  want=$(cat scripts/patches/poselib-threeview.patch scripts/patches/poselib_*.py | sha256sum | cut -c1-16)
+  [[ $(cat "$ROOT/third_party/PoseLib-threeview/.build_stamp" 2>/dev/null) == "$want" ]] \
+    && "$PY" -c "import poselib; poselib.estimate_three_view_shared_focal_sequential" 2>/dev/null
 }
+
+json_ok() { "$PY" -c "import json, sys; json.load(open(sys.argv[1]))" "$1" 2>/dev/null; }
 
 step_setup() {
   [[ -d $SSD/data/cambridge ]] || die "SSD not found at $SSD (plug it in, or set SSD=...)"
-  git pull --ff-only || log "git pull failed; continuing with the local checkout"
+  if [[ -z ${ABL_PULLED:-} ]]; then
+    local before; before=$(sha256sum scripts/run_abl_dell.sh)
+    git pull --ff-only || log "git pull failed; continuing with the local checkout"
+    if [[ $(sha256sum scripts/run_abl_dell.sh) != "$before" ]]; then   # run the new runner from here on
+      log "setup: git pull changed this runner; restarting it with: ${REST[*]}"
+      exec env ABL_BG=1 ABL_PULLED=1 bash "$ROOT/scripts/run_abl_dell.sh" "${REST[@]}"
+    fi
+  fi
   [[ -d $TV ]] || die "third_party/threeview missing: run bash scripts/setup_workstation.sh first"
   grep -q "DEVICE = " "$TV/datasets/prepare_im.py" \
     || patch -d "$TV" -p1 --forward <scripts/patches/threeview-cpu.patch || die "threeview-cpu.patch"
@@ -102,11 +124,12 @@ step_setup() {
     || die "python imports"
   OMP_NUM_THREADS=1 "$PY" -W ignore src/homotopy_proto.py --n 3 --noise 0.5 --out "$OUT/smoke" >/dev/null \
     || die "prototype smoke test"
-  if ! fork_current; then   # out-of-bounds fixes and the kill test A refit (scripts/patches/poselib_*.py)
-    log "setup: rebuilding the PoseLib fork with the OOB fixes and the refit (log $OUT/fork_build.log)"
+  if ! fork_current; then   # OOB fixes, kill test A refit, Task 2.9 baseline (scripts/patches/poselib_*.py)
+    log "setup: rebuilding the PoseLib fork from the current patches (log $OUT/fork_build.log)"
+    # results from the old fork would not be comparable (OOB reads in every '+ R' row), so stop on a failure
     ONLY=poselib bash scripts/build_seed_code.sh >"$OUT/fork_build.log" 2>&1 && fork_current \
-      && log "setup: fork rebuilt" \
-      || log "setup: fork rebuild FAILED (see $OUT/fork_build.log); the old poselib stays installed"
+      || die "setup: fork rebuild failed (see $OUT/fork_build.log)"
+    log "setup: fork rebuilt"
   fi
   log "setup ok"
 }
@@ -144,7 +167,9 @@ step_eth3d() {
   for s in "${ETH_SCENES[@]}"; do
     eth_done "$s" && continue
     log "eth3d triplets: $s"
-    ( cd "$TV" && "$PY" -u -W ignore "$ROOT/scripts/prepare_triplets.py" -n 0 --threeview . "$ETRIP" "$ETH" "$s" ) \
+    # every image triplet passing the overlap test, at most ETH_N (seeded choice, so a resumed scene matches)
+    ( cd "$TV" && "$PY" -u -W ignore "$ROOT/scripts/prepare_triplets.py" -n 0 --cap "${ETH_N:-2000}" --threeview . \
+        "$ETRIP" "$ETH" "$s" ) \
       >>"$OUT/eth3d.log" 2>&1 || { log "eth3d $s failed (see $OUT/eth3d.log)"; continue; }
     "$PY" scripts/filter_same_camera.py "$ETRIP/$s" "$ETH/$s/dslr_calibration_undistorted" | tee -a "$OUT/eth3d.log"
   done
@@ -168,14 +193,18 @@ run_evalf() {   # run_evalf <triplet dir> <feature> <tag or ""> [eval_f.py optio
   # eval_f.py forks a Pool it never closes, and on abl-dell runs sometimes froze for good (St Mary's: 3 of 5
   # tries on 2026-10-22/23), idle. A watchdog polls the CPU time of the run's process group (timeout makes
   # one) every 30 s: no CPU for 2 min after it was busy means a hang, and the group is killed and the run
-  # retried (at most four tries). Once the results file exists the run is not waited for any more.
+  # retried (at most four tries). Once the results file exists and has stopped growing, the run is stopped;
+  # a results file that does not parse is moved aside (.bad) and the run retried.
   # EVALF_TIMEOUT stays as an outer bound for the case where ps cannot read the group.
-  local dir=$1 f=$2 tag=$3 s try pid cpu last idle; shift 3
+  local dir=$1 f=$2 tag=$3 s try pid cpu last idle size k; shift 3
   s=$(basename "$dir")
   local short=splg; [[ $f == *SIFT* ]] && short=sift   # SP+LG and SIFT logs must not share a name
   local json=$TV/results/focal_$s${tag:+-$tag}-$f.json logf=$OUT/evalf_${s}${tag:+_$tag}_$short.log
   for try in 1 2 3 4; do
-    [[ -f $json ]] && return 0
+    if [[ -f $json ]]; then
+      json_ok "$json" && return 0
+      log "evalf $s $f: unreadable results file, moved to $json.bad"; mv -f "$json" "$json.bad"
+    fi
     log "evalf: $s $f${tag:+ ($tag)} (try $try)"
     # eval_f_safe.py runs eval_f.py unchanged with a pool that survives poselib crashes (general protection
     # faults on some Great Court / St Mary's triplets) and saves each crashing task for crashdebug.
@@ -186,8 +215,14 @@ run_evalf() {   # run_evalf <triplet dir> <feature> <tag or ""> [eval_f.py optio
     pid=$! last=0 idle=0      # after exec this pid is timeout's, which leads its own process group
     while kill -0 "$pid" 2>/dev/null; do
       sleep 30
-      if [[ -f $json ]]; then                      # results written: give it a minute to exit, then stop it
-        sleep 60; kill -0 "$pid" 2>/dev/null && kill -TERM -- "-$pid" 2>/dev/null; break
+      if [[ -f $json ]]; then   # results being written: wait (up to 10 min) until it stops growing and parses
+        size=-1
+        for ((k = 0; k < 20; k++)); do
+          kill -0 "$pid" 2>/dev/null || break
+          [[ $(stat -c %s "$json" 2>/dev/null) == "$size" ]] && json_ok "$json" && break
+          size=$(stat -c %s "$json" 2>/dev/null); sleep 30
+        done
+        kill -0 "$pid" 2>/dev/null && kill -TERM -- "-$pid" 2>/dev/null; break   # eval_f.py never exits by itself
       fi
       cpu=$(group_cpu "$pid")
       [[ -n $cpu ]] || continue                    # ps cannot read the group: rely on the outer timeout
@@ -200,7 +235,7 @@ run_evalf() {   # run_evalf <triplet dir> <feature> <tag or ""> [eval_f.py optio
     done
     wait "$pid" 2>/dev/null || log "evalf $s $f: exit $? (124 = outer timeout, 143/137 = stopped; see $logf)"
   done
-  [[ -f $json ]] || { log "evalf $s $f${tag:+ ($tag)}: no results after 4 tries"; return 1; }
+  [[ -f $json ]] && json_ok "$json" || { log "evalf $s $f${tag:+ ($tag)}: no readable results after 4 tries"; return 1; }
 }
 
 step_evalf() {
@@ -259,6 +294,44 @@ step_requeue() {
   mv "$TV"/results/focal_*.json "$TV"/results/kill_test_a-*.json "$TV"/results/*-control-*.json "$dst/" 2>/dev/null
   rm -f "$OUT/control.done" "$OUT/killA.txt"
   log "requeue: moved $(ls "$dst" | wc -l) result files to $dst; evalf, killA and control will rerun"
+}
+
+# Every job the runner starts (the processes left behind when the runner itself is stopped)
+JOBS='eval_f_safe.py|homotopy_proto.py|check_fourp3vf.py|prepare_triplets.py|sift_triplets.py|outlier_stats.py|success_rates.py|poselib_crash_repro.py|run_tzamos_table.sh|build_seed_code.sh|machine_sheet.sh'
+
+step_stop() {   # stop the background runner and every job it started, monodromy included
+  local pid
+  pid=$(cat "$OUT/runner.pid" 2>/dev/null)
+  [[ -n $pid ]] && grep -qa run_abl_dell "/proc/$pid/cmdline" 2>/dev/null && kill "$pid"
+  pkill -f "$JOBS"
+  sleep 3
+  pkill -KILL -f "$JOBS"
+  echo "stopped; jobs still running: $(pgrep -fc "$JOBS")"
+}
+
+step_fresh() {
+  # Retest everything: move every earlier result aside (results/archive/<time>/, threeview's results/archive_<time>/,
+  # the SSD copy to abl_dell_results_<time>/) and drop the fork's build stamp so setup rebuilds it from the
+  # pristine source. Triplets, SIFT tracks and ETH3D data stay: they are inputs, and their steps resume.
+  pgrep -f "$JOBS" >/dev/null && die "fresh: jobs of an earlier run are still going (bash scripts/run_abl_dell.sh stop)"
+  local ts; ts=$(date +%Y%m%d_%H%M)
+  local a=$ROOT/results/archive/$ts ta=$TV/results/archive_$ts f n=0
+  mkdir -p "$a/abl_dell" "$ta"
+  for f in "$TV"/results/focal_*.json "$TV"/results/focal_*.json.bad "$TV"/results/kill_test_a-*.json \
+           "$TV"/results/*-control-*.json; do
+    [[ -e $f ]] && mv "$f" "$ta/" && n=$((n + 1))
+  done
+  for f in "$ROOT/results/killB" "$ROOT/results/task28" "$ROOT/results/crashes_eval"; do
+    [[ -e $f ]] && mv "$f" "$a/" && n=$((n + 1))
+  done
+  for f in "$OUT"/killA.txt "$OUT"/killB* "$OUT"/seq.txt "$OUT"/task28* "$OUT"/control.* "$OUT"/crashes \
+           "$OUT"/monodromy_rng* "$OUT"/compare_focal.txt "$OUT"/crash_report.txt "$OUT"/evalf_*.log \
+           "$OUT"/fork_build.log "$OUT"/thresh1.log "$OUT"/runtime.log; do
+    [[ -e $f ]] && mv "$f" "$a/abl_dell/" && n=$((n + 1))
+  done
+  [[ -d $SSD/abl_dell_results ]] && mv "$SSD/abl_dell_results" "$SSD/abl_dell_results_$ts"
+  rm -f "$ROOT/third_party/PoseLib-threeview/.build_stamp"
+  log "fresh: moved $n earlier results to $a and $ta; the fork will be rebuilt"
 }
 
 step_crashdebug() {
@@ -360,11 +433,13 @@ step_status() {
       "$(nlines "$TRIP/$s/$SIFT.txt")" "$([[ -f $TV/results/focal_$s-$FEAT.json ]] && echo done || echo -)" \
       "$(ls "$ROOT/results/killB/${s}_shard"*_summary.json 2>/dev/null | wc -l)"
   done
-  local n_eth=0 n_trip=0
+  local n_eth=0 n_trip=0 n_sift=0 n_ev=0
   for s in "${ETH_SCENES[@]}"; do
     eth_done "$s" && { n_eth=$((n_eth + 1)); n_trip=$((n_trip + $(nlines "$ETRIP/$s/$FEAT.txt"))); }
+    [[ -f $ETRIP/$s/$SIFT.txt ]] && n_sift=$((n_sift + 1))
+    [[ -f $TV/results/focal_$s-$FEAT.json ]] && n_ev=$((n_ev + 1))
   done
-  echo "ETH3D: $n_eth/${#ETH_SCENES[@]} scenes, $n_trip same-camera triplets"
+  echo "ETH3D: $n_eth/${#ETH_SCENES[@]} scenes, $n_trip same-camera triplets, SIFT $n_sift, evalf $n_ev"
   echo "control row: $([[ -f $OUT/control.done ]] && echo done || echo -)   poselib crashes logged:" \
        "$(cat "$OUT"/crashes/*/crashes.jsonl 2>/dev/null | wc -l)"
   local last newest=""
@@ -387,14 +462,25 @@ step_status() {
   fi
 }
 
-STEPS=("$@")
-(( ${#STEPS[@]} )) || STEPS=(setup machine monodromy triplets sift evalf killB killA control eth3d sift evalf seq task28 compare crashdebug collect)
-for st in "${STEPS[@]}"; do
-  declare -F "step_$st" >/dev/null || die "unknown step: $st"
-  [[ $st == status ]] || log "== $st"
-  "step_$st"
-done
-if [[ " ${STEPS[*]} " == *" monodromy "* ]]; then
-  log "waiting for monodromy"; wait; step_collect
-fi
-[[ ${STEPS[*]} == status ]] || log "all requested steps finished"
+# Every dataset first (Cambridge and ETH3D triplets, SIFT tracks), then the evaluations on complete data.
+DEFAULT=(setup machine monodromy triplets eth3d sift evalf killB killA seq control task28 compare crashdebug collect)
+
+main() {
+  local steps=("$@") i st
+  (( ${#steps[@]} )) || steps=("${DEFAULT[@]}")
+  [[ ${steps[*]} == fresh ]] && steps=(fresh "${DEFAULT[@]}")
+  for st in "${steps[@]}"; do declare -F "step_$st" >/dev/null || die "unknown step: $st"; done
+  for ((i = 0; i < ${#steps[@]}; i++)); do
+    st=${steps[i]}
+    REST=("${steps[@]:i}")   # what setup restarts with when git pull changed this file
+    [[ $st == status || $st == stop ]] || log "== $st"
+    "step_$st"
+  done
+  if [[ " ${steps[*]} " == *" monodromy "* ]]; then
+    log "waiting for monodromy"; wait; step_collect
+  fi
+  [[ ${steps[*]} == status || ${steps[*]} == stop ]] || log "all requested steps finished"
+}
+
+# On one line, so bash has read the whole file before running anything (git pull may replace it mid-run).
+main "$@"; exit

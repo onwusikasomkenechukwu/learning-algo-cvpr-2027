@@ -40,6 +40,7 @@ grep -q "DEVICE = " "$TP/threeview/datasets/prepare_im.py" \
 grep -q -- "--exps" "$TP/threeview/eval_f.py" \
   || patch -d "$TP/threeview" -p1 --forward < scripts/patches/threeview-eval.patch
 "$PY" scripts/patches/threeview_enm.py "$TP/threeview"   # '+ ENM' -> two-view refit in eval_f.py
+"$PY" scripts/patches/threeview_seq.py "$TP/threeview"   # '+ SEQ' -> sequential baseline in eval_f.py
 rm -f "$TP"/threeview/*.rej "$TP"/threeview/*/*.rej "$TP"/threeview/*.orig "$TP"/threeview/*/*.orig
 unpack "wheelhouse/src/superansac-*.tar.gz" superansac
 # Eigen 3.4 is header-only but ships its CMake config only after configuring; do that once.
@@ -69,6 +70,7 @@ unpack "wheelhouse/src/PoseLib-*.tar.gz" PoseLib-threeview
 patch -d "$TP/PoseLib-threeview" -p1 --forward < scripts/patches/poselib-threeview.patch
 "$PY" scripts/patches/poselib_oob_fixes.py "$TP/PoseLib-threeview"   # sample[4] read past the end in inner_refine
 "$PY" scripts/patches/poselib_shared_focal_refit.py "$TP/PoseLib-threeview"   # kill test A two-view refit
+"$PY" scripts/patches/poselib_sequential.py "$TP/PoseLib-threeview"   # Task 2.9 sequential baseline + binding
 # setup.py only forwards Python_EXECUTABLE to CMake; the patched CMakeLists find torch and pybind11
 # through that interpreter. --no-cache: uv would otherwise reuse a wheel built from an older patch.
 ( cd "$TP/PoseLib-threeview" && \

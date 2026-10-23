@@ -12,6 +12,7 @@
 #              decision (continuation >= LM + 5 pp, McNemar p < 0.05)
 #   killA      Kill test A: rebuild the fork with the shared-focal two-view refit, run the re-fitted mean-point
 #              rows ('+ ENM') per Cambridge scene, decide (best re-fitted variant trails 6p3v by >= 2.0 AUC@10)
+#   seq        Task 2.9 sequential baseline ('6p3v + SEQ') per Cambridge scene, next to 6pt+P3P
 #   control    5pt+P3P+R+F control row (eval.py '5p3v + R + C') on the released triplets, own results file
 #   eth3d      ETH3D SP+LG triplets (12 scenes, every qualifying triplet, 800 px), filtered to one
 #              intrinsics block per triplet (Tasks 1.4 / 1.6)
@@ -73,7 +74,8 @@ finished_dirs() {   # "<triplet dir> <image root>" for every scene with finished
 
 fork_current() {   # the built fork carries every source edit of scripts/build_seed_code.sh
   local src=$ROOT/third_party/PoseLib-threeview/PoseLib/robust/estimators/relative_pose.cc
-  grep -q "OOB fix" "$src" 2>/dev/null && grep -q "Two-view refit (kill test A" "$src" 2>/dev/null
+  grep -q "OOB fix" "$src" 2>/dev/null && grep -q "Two-view refit (kill test A" "$src" 2>/dev/null \
+    && grep -q "estimate_3v_shared_focal_sequential" "$ROOT/third_party/PoseLib-threeview/PoseLib/robust.cc" 2>/dev/null
 }
 
 step_setup() {
@@ -85,6 +87,8 @@ step_setup() {
   grep -q "Resuming with" "$TV/datasets/prepare_im.py" || die "threeview has an older CPU patch: re-extract it"
   grep -q -- "--exps" "$TV/eval_f.py" \
     || patch -d "$TV" -p1 --forward <scripts/patches/threeview-eval.patch || die "threeview-eval.patch"
+  "$PY" scripts/patches/threeview_enm.py "$TV" >/dev/null || die "threeview_enm.py"   # '+ ENM' (kill test A)
+  "$PY" scripts/patches/threeview_seq.py "$TV" >/dev/null || die "threeview_seq.py"   # '+ SEQ' (Task 2.9)
   local ck=$HOME/.cache/torch/hub/checkpoints
   mkdir -p "$ck"
   for w in superpoint_v1.pth superpoint_lightglue_v0-1_arxiv.pth; do
@@ -272,6 +276,21 @@ step_crashdebug() {
   log "crash report: $rep ($(cat "$OUT"/crashes/*/crashes.jsonl 2>/dev/null | wc -l) crashing tasks logged)"
 }
 
+step_seq() {
+  # Task 2.9: the sequential baseline ('6p3v + SEQ': six-point LO-RANSAC on views 1-2, P3P LO-RANSAC on view 3,
+  # three-view refinement) through eval_f.py next to 6pt+P3P, SP+LG and SIFT, every finished Cambridge scene.
+  fork_current || { log "seq: the fork lacks the sequential baseline (see setup); skipped"; return; }
+  local s f
+  for s in "${SCENES[@]}"; do
+    cam_done "$s" || continue
+    for f in "$FEAT" "$SIFT"; do
+      [[ -f $TRIP/$s/$f.txt ]] && { run_evalf "$TRIP/$s" "$f" seq --exps "6p3v + SEQ" || true; }
+    done
+  done
+  { "$PY" scripts/compare_tzamos_focal.py "$TV/results" --feat "$FEAT" --tag seq
+    "$PY" scripts/compare_tzamos_focal.py "$TV/results" --feat "$FEAT"; } 2>&1 | tee "$OUT/seq.txt"
+}
+
 step_control() {
   [[ -f $OUT/control.done ]] && { log "control row already done"; return; }
   "${ONE_THREAD[@]}" bash scripts/run_tzamos_table.sh --exps "5p3v + R + C" --tag control >"$OUT/control.log" 2>&1 \
@@ -332,6 +351,7 @@ step_status() {
   for r in 8 9; do echo "monodromy rng$r: $(tail -1 "$OUT/monodromy_rng$r.log" 2>/dev/null)"; done
   [[ -f $OUT/killB.txt ]] && tail -1 "$OUT/killB.txt"
   [[ -f $OUT/killA.txt ]] && grep -a "KILL TEST A\|WARNING" "$OUT/killA.txt"
+  [[ -f $OUT/seq.txt ]] && grep -a -E "^(6p3v|6p3v \+ SEQ) " "$OUT/seq.txt" | sed "s/^/Task 2.9: /"
   echo "== last log lines"; tail -4 "$OUT/run.log" 2>/dev/null
   if [[ -f $OUT/runner.pid ]] && kill -0 "$(cat "$OUT/runner.pid")" 2>/dev/null; then
     echo "runner: RUNNING"
@@ -341,7 +361,7 @@ step_status() {
 }
 
 STEPS=("$@")
-(( ${#STEPS[@]} )) || STEPS=(setup machine monodromy triplets sift evalf killB killA control eth3d sift evalf compare crashdebug collect)
+(( ${#STEPS[@]} )) || STEPS=(setup machine monodromy triplets sift evalf killB killA seq control eth3d sift evalf compare crashdebug collect)
 for st in "${STEPS[@]}"; do
   declare -F "step_$st" >/dev/null || die "unknown step: $st"
   [[ $st == status ]] || log "== $st"

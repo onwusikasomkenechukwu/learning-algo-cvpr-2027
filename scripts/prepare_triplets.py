@@ -11,7 +11,7 @@ prepare_im.py is loaded by path because its folder name `datasets` clashes with 
 
 Usage (from the patched threeview folder):
   python ~/learning-algo/scripts/prepare_triplets.py OUT_DIR $SSD/data/cambridge KingsCollege OldHospital ...
-  python ~/learning-algo/scripts/prepare_triplets.py -n 0 --cap 2000 OUT_DIR $SSD/data/eth3d courtyard delivery_area ...
+  python ~/learning-algo/scripts/prepare_triplets.py -n 0 --cap 2000 --same-camera OUT_DIR $SSD/data/eth3d courtyard ...
 """
 import argparse
 import importlib.util
@@ -33,6 +33,9 @@ def main():
     ap.add_argument("--cap", type=int, default=0,
                     help="with -n 0: at most this many triplets, a seeded random choice among the image triplets "
                          "that pass prepare_im.py's overlap test (0 = all of them)")
+    ap.add_argument("--same-camera", action="store_true",
+                    help="with -n 0: only image triplets whose three images share one intrinsics block (ETH3D; "
+                         "applied before --cap, so the cap counts usable triplets)")
     ap.add_argument("--threeview", default=".", help="patched threeview checkout")
     args = ap.parse_args()
     tv = Path(args.threeview).resolve()
@@ -47,23 +50,26 @@ def main():
     for scene in args.scenes:
         t0 = time.time()
         print(f"== {scene}", flush=True)
-        if args.n <= 0 and args.cap > 0:
-            capped_combinations(prep, args.data_dir, scene, args.cap)
+        if args.n <= 0 and (args.cap > 0 or args.same_camera):
+            capped_combinations(prep, args.data_dir, scene, args.cap, args.same_camera)
         prep.prepare_single(pargs, scene)
         print(f"== {scene} done in {time.time() - t0:.0f} s", flush=True)
 
 
-def capped_combinations(prep, data_dir, scene, cap, seed=100, min_area=0.1):
-    """Make prepare_im.py's every-triplet mode (-n 0) visit at most `cap` image triplets: those passing its own
-    overlap test (co-visible area > min_area in all three images), a seeded random choice when there are more.
-    Asking prepare_im.py for -n cap instead could loop forever when fewer triplets survive its later checks."""
+def capped_combinations(prep, data_dir, scene, cap, same_camera=False, seed=100, min_area=0.1):
+    """Make prepare_im.py's every-triplet mode (-n 0) visit at most `cap` image triplets (0 = no cap): those passing
+    its own overlap test (co-visible area > min_area in all three images), with same_camera only those within one
+    intrinsics block, a seeded random choice when there are more. Asking prepare_im.py for -n cap instead could
+    loop forever when fewer triplets survive its later checks."""
     _, model_path, _ = prep.get_dataset_paths(Path(data_dir).name, data_dir, scene)
     cameras, images, points = prep.read_model(model_path)
     ids = list(images.keys())
     ok = [c for c in itertools.combinations(ids, 3)
-          if min(prep.get_overlap_areas(cameras, images, points, c)) > min_area]
-    chosen = ok if len(ok) <= cap else random.Random(seed).sample(ok, cap)
-    print(f"{scene}: {len(ok)} image triplets pass the overlap test; matching {len(chosen)}", flush=True)
+          if (not same_camera or len({images[i].camera_id for i in c}) == 1)
+          and min(prep.get_overlap_areas(cameras, images, points, c)) > min_area]
+    chosen = ok if cap <= 0 or len(ok) <= cap else random.Random(seed).sample(ok, cap)
+    print(f"{scene}: {len(ok)} image triplets pass the overlap test{' within one camera' if same_camera else ''}; "
+          f"matching {len(chosen)}", flush=True)
     prep.itertools = types.SimpleNamespace(combinations=lambda *_: list(chosen))
 
 

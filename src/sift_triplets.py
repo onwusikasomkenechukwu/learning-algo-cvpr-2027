@@ -122,8 +122,9 @@ def main():
                 g.create_dataset("kp", data=kp)
                 g.create_dataset("desc", data=desc.astype(np.float16), compression="lzf")
 
+    # Written under temporary names and renamed at the end: the runner takes an existing .txt as a finished scene.
     n_rows = []
-    with h5py.File(f"{out}.h5", "w") as fo, open(f"{out}.txt", "w") as ft, \
+    with h5py.File(f"{out}.h5.part", "w") as fo, open(f"{out}.txt.part", "w") as ft, \
             Pool(args.num_workers, initializer=_init, initargs=(str(cache),)) as pool:
         jobs = [(tuple(t), args.max_ratio) for t in triplets]
         for names, rows in tqdm(pool.imap(_match, jobs, chunksize=4), total=len(jobs), desc="matching"):
@@ -132,6 +133,8 @@ def main():
             fo.create_dataset("-".join(names), data=rows)
             ft.write(" ".join(names) + "\n")
             n_rows.append(len(rows))
+    os.replace(f"{out}.h5.part", f"{out}.h5")
+    os.replace(f"{out}.txt.part", f"{out}.txt")
     kept = np.array(n_rows)
     print(f"wrote {out}.h5: {len(kept)}/{len(triplets)} triplets, median {np.median(kept):.0f} tracks "
           f"(<= {args.max_ratio}), eval keeps r12, r13 <= 0.9")

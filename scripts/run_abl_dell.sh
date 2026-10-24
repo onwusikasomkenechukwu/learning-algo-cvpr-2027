@@ -19,8 +19,8 @@
 #   task28     Task 2.8 outlier labels / histograms / low-inlier set / mixture, success rates on courtyard,
 #              predicted crossovers (results/task28/predictions_{tracking,free}.md)
 #   control    5pt+P3P+R+F control row (eval.py '5p3v + R + C') on the released triplets, own results file
-#   eth3d      ETH3D SP+LG triplets (12 scenes, every qualifying triplet up to ETH_N = 2000 per scene, 800 px),
-#              filtered to one intrinsics block per triplet (Tasks 1.4 / 1.6)
+#   eth3d      ETH3D SP+LG triplets (12 scenes, 800 px): every image triplet within one intrinsics block that passes
+#              the overlap test, at most ETH_N = 2000 per scene (Tasks 1.4 / 1.6)
 #   compare    pooled shared-focal tables per dataset and feature (scripts/compare_tzamos_focal.py)
 #   requeue    (not default) move results computed before the OOB fix aside so evalf / killA / control rerun
 #   crashdebug replay saved poselib crashes under gdb -> results/abl_dell/crash_report.txt (native backtraces)
@@ -167,9 +167,10 @@ step_eth3d() {
   for s in "${ETH_SCENES[@]}"; do
     eth_done "$s" && continue
     log "eth3d triplets: $s"
-    # every image triplet passing the overlap test, at most ETH_N (seeded choice, so a resumed scene matches)
-    ( cd "$TV" && "$PY" -u -W ignore "$ROOT/scripts/prepare_triplets.py" -n 0 --cap "${ETH_N:-2000}" --threeview . \
-        "$ETRIP" "$ETH" "$s" ) \
+    # every image triplet within one camera block passing the overlap test, at most ETH_N (seeded choice); the
+    # camera condition comes before the cap, so filter_same_camera.py below keeps every matched triplet
+    ( cd "$TV" && "$PY" -u -W ignore "$ROOT/scripts/prepare_triplets.py" -n 0 --cap "${ETH_N:-2000}" --same-camera \
+        --threeview . "$ETRIP" "$ETH" "$s" ) \
       >>"$OUT/eth3d.log" 2>&1 || { log "eth3d $s failed (see $OUT/eth3d.log)"; continue; }
     "$PY" scripts/filter_same_camera.py "$ETRIP/$s" "$ETH/$s/dslr_calibration_undistorted" | tee -a "$OUT/eth3d.log"
   done

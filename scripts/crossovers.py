@@ -107,7 +107,9 @@ def main():
     lines = [f"# Predicted crossovers, {pred['date']} (Task 2.8, written before any low-inlier run)", "",
              f"Inputs: s_6 = {p['s6']:.3f}, s_M = {p['sM']:.3f}, s_E = {p['sE']:.3f} ({args.rates} samples, "
              f"{args.success.name}); per-sample ms: 6pt+P3P {t6:.4f}, 4p3vf(M) {tM:.4f}, ours {p['tO']:.4f} "
-             f"(tracking {track:.3f}), sequential {tseq if tseq is None else round(tseq, 4)}.", ""]
+             f"(tracking {track:.3f}), sequential {tseq if tseq is None else round(tseq, 4)}."
+             + (" No tracking time was measured (no sample tracked), so ours = 4p3vf(M) cost per sample."
+                if args.track_ms is None and not track else ""), ""]
     if mix:
         lines.append("Measured outlier mixture (" + ", ".join(f"{k} {v:.2f}" for k, v in mix.items()
                                                           if isinstance(v, float)) + ").")

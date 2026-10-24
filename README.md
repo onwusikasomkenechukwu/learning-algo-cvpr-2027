@@ -98,7 +98,7 @@ bash scripts/run_abl_dell.sh stop       # stop the runner and every job it start
 Steps, in default order (each skips work already done; name steps to run only those): `setup` (git pull,
 patches, fork rebuild when the installed fork was not built from the current patches, import checks),
 `machine` (Task 1.3 machine sheet), `monodromy`, `triplets` (Cambridge SP+LG, resumable), `eth3d` (every
-qualifying triplet, at most `ETH_N=2000` per scene), `sift`, `evalf` (Tzamos et al.'s `eval_f.py` via the
+qualifying triplet within one camera block, at most `ETH_N=2000` per scene), `sift`, `evalf` (Tzamos et al.'s `eval_f.py` via the
 crash-safe wrapper), `killB`, `killA`, `seq` (Task 2.9), `control` (5pt+P3P+R+F), `task28` (Task 2.8),
 `compare`, `crashdebug`, `collect` (copy to the SSD, flushed; eject before unplugging). All datasets are
 built before any evaluation. `fresh` archives earlier results to `results/archive/<time>/` (and

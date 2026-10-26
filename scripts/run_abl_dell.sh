@@ -13,8 +13,9 @@
 #              finished scene and feature type; one run each (eval_f.py has no RANSAC seed option)
 #   killB      Kill test B on SP+LG all-inlier samples, one per triplet, sharded over all cores, then the
 #              decision (continuation >= LM + 5 pp, McNemar p < 0.05)
-#   killA      Kill test A: rebuild the fork with the shared-focal two-view refit, run the re-fitted mean-point
-#              rows ('+ ENM') per Cambridge scene, decide (best re-fitted variant trails 6p3v by >= 2.0 AUC@10)
+#   killA      Kill test A: the re-fitted mean-point rows ('+ ENM') per Cambridge scene, three runs (RANSAC seeds
+#              0-2: KA_RUNS), decide (best re-fitted variant trails 6p3v by >= 2.0 AUC@10), then stats
+#   stats      both kill tests with intervals (scripts/kill_test_stats.py -> results/abl_dell/kill_test_stats.md)
 #   seq        Task 2.9 sequential baseline ('6p3v + SEQ') per finished scene, next to 6pt+P3P
 #   task28     Task 2.8 outlier labels / histograms / low-inlier set / mixture, success rates on courtyard,
 #              predicted crossovers (results/task28/predictions_{tracking,free}.md)
@@ -122,6 +123,7 @@ step_setup() {
     || patch -d "$TV" -p1 --forward <scripts/patches/threeview-eval.patch || die "threeview-eval.patch"
   "$PY" scripts/patches/threeview_enm.py "$TV" >/dev/null || die "threeview_enm.py"   # '+ ENM' (kill test A)
   "$PY" scripts/patches/threeview_seq.py "$TV" >/dev/null || die "threeview_seq.py"   # '+ SEQ' (Task 2.9)
+  "$PY" scripts/patches/threeview_seed.py "$TV" >/dev/null || die "threeview_seed.py"   # EVALF_SEED (kill test A)
   local ck=$HOME/.cache/torch/hub/checkpoints
   mkdir -p "$ck"
   for w in superpoint_v1.pth superpoint_lightglue_v0-1_arxiv.pth; do
@@ -219,6 +221,7 @@ run_evalf() {   # run_evalf <triplet dir> <feature> <tag or ""> [eval_f.py optio
     # eval_f_safe.py runs eval_f.py unchanged with a pool that survives poselib crashes (general protection
     # faults on some Great Court / St Mary's triplets) and saves each crashing task for crashdebug.
     ( cd "$TV" && exec env PYTHONPATH="$PWD" MPLBACKEND=Agg EVALF_CRASH_DIR="$OUT/crashes/${s}${tag:+_$tag}_$short" \
+        EVALF_SEED="${EVALF_SEED:-0}" \
         timeout -k 60 "${EVALF_TIMEOUT:-14400}" "${ONE_THREAD[@]}" \
         "$PY" -W ignore "$ROOT/scripts/eval_f_safe.py" -nw "$NW" ${tag:+--tag "$tag"} "$@" "$f" "$dir" ) \
       >"$logf" 2>&1 &
@@ -263,14 +266,32 @@ step_killA() {
   # the five Cambridge scenes. The fork is rebuilt once with scripts/patches/poselib_shared_focal_refit.py.
   fork_current || { log "killA: the fork lacks the refit (see setup); kill test A skipped"; return; }
   "$PY" scripts/patches/threeview_enm.py "$TV" || { log "killA: could not map '+ ENM' in eval_f.py"; return; }
+  "$PY" scripts/patches/threeview_seed.py "$TV" || { log "killA: could not add EVALF_SEED to eval_f.py"; return; }
   local exps="4p3v(M) + ENM;4p3v(M) + R + ENM;4p3v(M) + R + C + ENM;4p3v(M-D) + ENM;4p3v(M-D) + R + ENM;4p3v(M-D) + R + C + ENM"
-  local s
+  local s k
   for s in "${SCENES[@]}"; do
     cam_done "$s" || { log "killA: skip $s (triplets not finished)"; continue; }
-    run_evalf "$TRIP/$s" "$FEAT" "" || true                      # 6p3v and the plain rows
+    run_evalf "$TRIP/$s" "$FEAT" "" || true                      # 6p3v and the plain rows (RANSAC seed 0)
     run_evalf "$TRIP/$s" "$FEAT" killA --exps "$exps" || true    # the refitted rows
+    # the instructions ask for three runs; eval_f.py's RANSAC seed is fixed, so further runs use other seeds
+    for ((k = 1; k < ${KA_RUNS:-3}; k++)); do
+      EVALF_SEED=$k run_evalf "$TRIP/$s" "$FEAT" "s$k" --exps "6p3v" || true
+      EVALF_SEED=$k run_evalf "$TRIP/$s" "$FEAT" "killA-s$k" --exps "$exps" || true
+    done
   done
-  "$PY" scripts/kill_test_a.py "$TV/results" --feat "$FEAT" | tee "$OUT/killA.txt"
+  "$PY" scripts/kill_test_a.py "$TV/results" --feat "$FEAT" | tee "$OUT/killA.txt"   # seed 0 only (first rule check)
+  step_stats
+}
+
+step_stats() {
+  # Both kill tests with intervals that respect scenes, RANSAC runs and the choice of the best variant
+  # (scripts/kill_test_stats.py); kill test A over every seeded run found
+  local kb=()
+  [[ -d $ROOT/results/killB ]] && kb=(--killb "$ROOT/results/killB")
+  "$PY" -W ignore scripts/kill_test_stats.py "${kb[@]}" --results "$TV/results" --feat "$FEAT" \
+    --out "$OUT/kill_test_stats" >"$OUT/kill_test_stats.log" 2>&1 \
+    && log "kill test statistics: $OUT/kill_test_stats.md" \
+    || log "stats failed (see $OUT/kill_test_stats.log)"
 }
 
 step_killB() {
@@ -334,7 +355,7 @@ step_fresh() {
   for f in "$ROOT/results/killB" "$ROOT/results/task28" "$ROOT/results/crashes_eval"; do
     [[ -e $f ]] && mv "$f" "$a/" && n=$((n + 1))
   done
-  for f in "$OUT"/killA.txt "$OUT"/killB* "$OUT"/seq.txt "$OUT"/task28* "$OUT"/control.* "$OUT"/crashes \
+  for f in "$OUT"/killA.txt "$OUT"/kill_test_stats.* "$OUT"/killB* "$OUT"/seq.txt "$OUT"/task28* "$OUT"/control.* "$OUT"/crashes \
            "$OUT"/monodromy_rng* "$OUT"/compare_focal.txt "$OUT"/crash_report.txt "$OUT"/evalf_*.log \
            "$OUT"/fork_build.log "$OUT"/thresh1.log "$OUT"/runtime.log; do
     [[ -e $f ]] && mv "$f" "$a/abl_dell/" && n=$((n + 1))
@@ -460,7 +481,8 @@ step_status() {
   [[ -n $newest ]] && echo "$(basename "$newest"): $(tail -c 400 "$newest" | tr '\r' '\n' | grep -a -v '^\s*$' | tail -1)"
   for r in 8 9; do echo "monodromy rng$r: $(tail -1 "$OUT/monodromy_rng$r.log" 2>/dev/null)"; done
   [[ -f $OUT/killB.txt ]] && tail -1 "$OUT/killB.txt"
-  [[ -f $OUT/killA.txt ]] && grep -a "KILL TEST A\|WARNING" "$OUT/killA.txt"
+  [[ -f $OUT/killA.txt ]] && grep -a "KILL TEST A\|WARNING" "$OUT/killA.txt" | sed "s/^/seed 0: /"
+  [[ -f $OUT/kill_test_stats.md ]] && grep -a "^KILL TEST" "$OUT/kill_test_stats.md" | sed "s/^/stats: /"
   [[ -f $OUT/seq.txt ]] && grep -a -E "^(6p3v|6p3v \+ SEQ) " "$OUT/seq.txt" | sed "s/^/Task 2.9: /"
   [[ -f $OUT/task28_outliers.log ]] && grep -a "guarded SIFT" "$OUT/task28_outliers.log" | sed "s/^/Task 2.8: /"
   [[ -f $OUT/task28_success.log ]] && grep -a "^ceiling" "$OUT/task28_success.log" | sed "s/^/Task 2.8: /"

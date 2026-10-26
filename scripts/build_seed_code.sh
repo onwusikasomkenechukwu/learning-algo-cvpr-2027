@@ -41,6 +41,7 @@ grep -q -- "--exps" "$TP/threeview/eval_f.py" \
   || patch -d "$TP/threeview" -p1 --forward < scripts/patches/threeview-eval.patch
 "$PY" scripts/patches/threeview_enm.py "$TP/threeview"   # '+ ENM' -> two-view refit in eval_f.py
 "$PY" scripts/patches/threeview_seq.py "$TP/threeview"   # '+ SEQ' -> sequential baseline in eval_f.py
+"$PY" scripts/patches/threeview_seed.py "$TP/threeview"  # EVALF_SEED -> RANSAC seed in eval_f.py
 rm -f "$TP"/threeview/*.rej "$TP"/threeview/*/*.rej "$TP"/threeview/*.orig "$TP"/threeview/*/*.orig
 unpack "wheelhouse/src/superansac-*.tar.gz" superansac
 # Eigen 3.4 is header-only but ships its CMake config only after configuring; do that once.

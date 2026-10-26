@@ -106,6 +106,15 @@ step_setup() {
     fi
   fi
   [[ -d $TV ]] || die "third_party/threeview missing: run bash scripts/setup_workstation.sh first"
+  # Triplet files on the SSD: every listed triplet in its .h5, and SIFT lists cut off by a killed run (older
+  # sift_triplets.py) moved aside so the sift step redoes them
+  local dirs=() d
+  for d in "$TRIP"/*/ "$ETRIP"/*/; do [[ -d $d ]] && dirs+=("${d%/}"); done
+  if (( ${#dirs[@]} )); then
+    "$PY" scripts/check_triplets.py --fix "${dirs[@]}" >"$OUT/data_check.txt" 2>&1 \
+      || die "broken triplet files on the SSD (see $OUT/data_check.txt)"
+    log "setup: triplet files checked ($OUT/data_check.txt)"
+  fi
   grep -q "DEVICE = " "$TV/datasets/prepare_im.py" \
     || patch -d "$TV" -p1 --forward <scripts/patches/threeview-cpu.patch || die "threeview-cpu.patch"
   grep -q "Resuming with" "$TV/datasets/prepare_im.py" || die "threeview has an older CPU patch: re-extract it"
@@ -441,6 +450,7 @@ step_status() {
     [[ -f $TV/results/focal_$s-$FEAT.json ]] && n_ev=$((n_ev + 1))
   done
   echo "ETH3D: $n_eth/${#ETH_SCENES[@]} scenes, $n_trip same-camera triplets, SIFT $n_sift, evalf $n_ev"
+  [[ -f $OUT/data_check.txt ]] && grep -a -E "INCOMPLETE|UNREADABLE|MISSING" "$OUT/data_check.txt" | sed "s/^/data: /"
   echo "control row: $([[ -f $OUT/control.done ]] && echo done || echo -)   poselib crashes logged:" \
        "$(cat "$OUT"/crashes/*/crashes.jsonl 2>/dev/null | wc -l)"
   local last newest=""

@@ -274,7 +274,7 @@ step_killA() {
 }
 
 step_killB() {
-  local n=${NSHARDS:-$NW} kb=$ROOT/results/killB files=() pids
+  local n=${NSHARDS:-$NW} kb=$ROOT/results/killB files=() pids i s
   mkdir -p "$kb"
   for s in "${SCENES[@]}"; do
     cam_done "$s" || { log "killB: skip $s (triplets not finished)"; continue; }
@@ -477,20 +477,22 @@ step_status() {
 DEFAULT=(setup machine monodromy triplets eth3d sift evalf killB killA seq control task28 compare crashdebug collect)
 
 main() {
-  local steps=("$@") i st
-  (( ${#steps[@]} )) || steps=("${DEFAULT[@]}")
-  [[ ${steps[*]} == fresh ]] && steps=(fresh "${DEFAULT[@]}")
-  for st in "${steps[@]}"; do declare -F "step_$st" >/dev/null || die "unknown step: $st"; done
-  for ((i = 0; i < ${#steps[@]}; i++)); do
-    st=${steps[i]}
-    REST=("${steps[@]:i}")   # what setup restarts with when git pull changed this file
-    [[ $st == status || $st == stop ]] || log "== $st"
-    "step_$st"
+  # Bash variables are visible to called functions: these names must not be used by any step (2026-10-26 the
+  # killB shard loop's i ended this loop after killB, so killA, seq, control and task28 never ran)
+  local _steps=("$@") _si _st
+  (( ${#_steps[@]} )) || _steps=("${DEFAULT[@]}")
+  [[ ${_steps[*]} == fresh ]] && _steps=(fresh "${DEFAULT[@]}")
+  for _st in "${_steps[@]}"; do declare -F "step_$_st" >/dev/null || die "unknown step: $_st"; done
+  for ((_si = 0; _si < ${#_steps[@]}; _si++)); do
+    _st=${_steps[_si]}
+    REST=("${_steps[@]:_si}")   # what setup restarts with when git pull changed this file
+    [[ $_st == status || $_st == stop ]] || log "== $_st"
+    "step_$_st"
   done
-  if [[ " ${steps[*]} " == *" monodromy "* ]]; then
+  if [[ " ${_steps[*]} " == *" monodromy "* ]]; then
     log "waiting for monodromy"; wait; step_collect
   fi
-  [[ ${steps[*]} == status || ${steps[*]} == stop ]] || log "all requested steps finished"
+  [[ ${_steps[*]} == status || ${_steps[*]} == stop ]] || log "all requested steps finished"
 }
 
 # On one line, so bash has read the whole file before running anything (git pull may replace it mid-run).

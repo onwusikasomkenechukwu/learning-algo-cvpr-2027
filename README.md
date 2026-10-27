@@ -4,28 +4,40 @@ Evaluation stack, reproductions of the seed papers and research prototypes for m
 RANSAC: calibrated two- and three-view relative pose, and three-view relative pose with an unknown shared
 focal length (4p3vf).
 
-## Status (2026-10-23)
+## Status (2026-10-27)
 The CVPR 2027 plan was single-path homotopy continuation from approximate (mean-point) seeds for 4p3vf.
 **Both pre-registered kill tests failed, so that paper is off.** The work continues as a controlled study of
-when solver exactness matters, starting with the outlier measurements and crossover predictions (Task 2.8)
-and the sequential six-point → P3P baseline (Task 2.9).
+when solver exactness matters: outlier measurements and crossover predictions (Task 2.8) and the sequential
+six-point → P3P baseline (Task 2.9), both now run on the complete datasets.
+
+The final numbers come from one complete rerun on abl-dell (2026-10-26) after the seed-code fixes below:
+5 Cambridge scenes × 5,000 SuperPoint+LightGlue triplets, all 12 ETH3D scenes (3,239 same-camera triplets),
+SIFT tracks for both, and no PoseLib crashes. Statistics: [`scripts/kill_test_stats.py`](scripts/kill_test_stats.py).
 
 | Kill test | Rule | Result |
 |---|---|---|
-| **B**: does continuation reach the correct root more often than converged LM from identical seeds? | ≥ +5 points, McNemar clear | **FAIL**: 15.4% vs 21.3% (−5.9 points), McNemar p = 5e-23, 12,859 all-inlier Cambridge samples (SP+LG); LM ahead in every scene |
-| **A**: does the best re-fitted mean-point variant still trail 6pt+P3P? | ≥ 2.0 AUC@10 | **FAIL**: 1.37 AUC@10 (95% two-level bootstrap [0.85, 1.83]), 4 of 5 Cambridge scenes, one run |
+| **B**: does continuation reach the correct root more often than converged LM from identical seeds? | ≥ +5 points, McNemar clear | **FAIL**: 15.6% vs 21.6%, **−6.0 points**, 95% CI [−6.9, −5.1] (two-level bootstrap over scenes [−7.2, −4.7]), McNemar p = 2.4e-40; 23,184 samples, 5,779 with an unambiguous correct root; LM ahead in all 5 scenes |
+| **A**: does the best re-fitted mean-point variant still trail 6pt+P3P? | ≥ 2.0 AUC@10 | **FAIL**: **1.61 AUC@10**, 95% CI [1.44, 1.78] with the five scenes fixed, [0.99, 2.18] with scenes resampled; best variant re-selected in every bootstrap replicate; mean of 3 RANSAC runs (1.41 / 1.69 / 1.74) |
 
-Kill test A, per scene (AUC@10, Cambridge, SuperPoint+LightGlue, 5,000 triplets each):
+Kill test B, per scene (continuation − LM, points, 95% CI): Great Court −4.1 [−6.1, −2.2], King's College
+−7.5 [−9.4, −5.6], Old Hospital −5.9 [−8.1, −3.8], Shop Facade −6.0 [−8.1, −4.0], St Mary's −5.7 [−7.7, −3.8];
+heterogeneity across scenes not significant (Q = 6.0, df 4, p = 0.2). The +5-point target and 0 are outside
+every interval. Continuation does beat Newton homotopy (+7.6 points) and plain Newton (+10.5) from the same
+seeds, so the tracker works; converged LM is simply better at reaching the correct root.
 
-| Method | King's College | Old Hospital | Shop Facade | St Mary's | Mean |
-|---|---|---|---|---|---|
-| 6pt+P3P (`6p3v`) | 64.50 | 47.69 | 64.86 | 58.24 | **58.83** |
-| 4p3vf(M) | 57.90 | 42.32 | 57.60 | 49.96 | 51.94 |
-| 4p3vf(M±δ)+R (best without re-fit) | 59.19 | 43.33 | 59.25 | 51.29 | 53.26 |
-| **4p3vf(M±δ) + two-view re-fit** (best) | 63.85 | 46.24 | 63.19 | 56.53 | **57.45** |
+Kill test A, per scene (AUC@10, mean of 3 RANSAC runs; rows without the re-fit are one run):
 
-Great Court is missing because the PoseLib fork crashed on some of its triplets (see *Known issues*); it
-would need a gap of 4.5 or more on its own to change the decision.
+| Method | Great Court | King's College | Old Hospital | Shop Facade | St Mary's | Mean |
+|---|---|---|---|---|---|---|
+| 6pt+P3P (`6p3v`) | 37.88 | 64.33 | 47.83 | 64.90 | 58.23 | **54.63** |
+| 4p3vf(M) | 28.44 | 57.32 | 42.02 | 57.40 | 49.49 | 46.93 |
+| 4p3vf(M±δ)+R (best without re-fit) | 28.97 | 58.03 | 42.84 | 58.64 | 50.85 | 47.87 |
+| **4p3vf(M±δ) + two-view re-fit** (best) | 35.45 | 63.78 | 46.24 | 63.43 | 56.20 | **53.02** |
+| Gap | 2.43 | 0.55 | 1.59 | 1.47 | 2.03 | **1.61** |
+
+Leaving out one scene at a time gives gaps of 1.41–1.88. The fail is clear on this benchmark; two scenes
+clear 2.0 on their own, so a different set of scenes could. The single-run value before the out-of-bounds
+fix (1.37 on four scenes) and after it (1.41 on five) agree: the seed-code bugs did not decide the outcome.
 
 **What we learned**
 - **The minimal 4p3vf problem is badly conditioned at real noise.** The exact root that continues the ground
@@ -33,19 +45,21 @@ would need a gap of 4.5 or more on its own to change the decision.
   mean-point seeds start a median 40° off. Real continuation paths fold or end at a wrong exact root of the
   right orientation class, which no check can reject.
 - **A cheap two-view re-fit, not exactness, closes most of the gap.** Re-fitting focal length and pose of
-  views 1–2 on each seed's inliers adds 4–5 AUC@10 to every mean-point variant (gap to 6pt+P3P 5.6 → 1.4).
+  views 1–2 on each seed's inliers adds 5.2–6.3 AUC@10 to every mean-point variant (gap to 6pt+P3P
+  6.8 → 1.6).
 - **The equations behave as derived.** Residuals of 3e-15 on 1,000 instances; the Jacobian loses rank by
   exactly two at coplanar points; the true root keeps its orientation class through 98/98 coplanar
-  crossings; monodromy finds 2,672 = 4 × 668 solutions, stable over three instances (668 per class, as
+  crossings; monodromy finds 2,672 = 4 × 668 solutions, stable over five instances (668 per class, as
   listed by Chien et al.).
-- **The shared-focal baseline reproduces:** on the same four scenes 6pt+P3P leads the mean-point solver by
-  6.89 AUC@10, against 6.91 in Tzamos et al.'s extended paper.
+- **The shared-focal baseline reproduces:** on King's College, Old Hospital, Shop Facade and St Mary's,
+  6pt+P3P leads 4p3vf(M) by 7.09 AUC@10 in the rerun (6.89 in the first run), against 6.91 in Tzamos et al.'s
+  extended paper.
 
 **Earlier results** (details in [`docs/REPORT.md`](docs/REPORT.md), written 2026-10-20)
 - **Tzamos et al. (CVPR 2025) reproduced with their own code:** their best method, 4p3v(M±δ)+R+F+ENM,
   gets AUC@5 65.99 vs 66.12 in the paper (PhotoTourism); variants with inner refinement match within
   0.1–1.8, variants without it and Aachen differ systematically. These '+R' rows were computed before the
-  out-of-bounds fix below and are being rerun.
+  out-of-bounds fix below and have not been rerun yet.
 - **Their unpublished learned 5th point:** +14 AUC@5 before refinement, nothing after it, 4–6× slower.
 - **Our learned sample-triage prototype (negative result):** 1.8× fewer draws than random before
   refinement, but ties a one-line spread rule after it (2.88 vs 2.90 draws). Outliers are not the
@@ -53,22 +67,45 @@ would need a gap of 4.5 or more on its own to change the decision.
 - **2-view baseline:** PoseLib 5pt LO-RANSAC, mAA@10 0.767 (tutorial val) / 0.709 (test, rebuilt GT).
 
 ## The study: Tasks 2.8 and 2.9
-- **Task 2.9, sequential baseline** (`6p3v + SEQ` in `eval_f.py`): shared-focal six-point LO-RANSAC on views 1–2,
-  P3P LO-RANSAC on view 3 against the stage-1 inliers triangulated at the stage-1 focal length, then the joint
-  estimator's final three-view refinement; same threshold, iteration limits and stopping rule in both stages.
-  Added to the PoseLib fork in C++ ([`scripts/patches/poselib_sequential.py`](scripts/patches/poselib_sequential.py))
-  with a Python binding, timed by `eval_f.py` like every other method.
-- **Task 2.8, where outliers sit** ([`scripts/outlier_stats.py`](scripts/outlier_stats.py)): every track labelled
-  against the reference cameras as correct in views 1–2 (fraction a), inlier (fraction b of those, w = ab) and
-  outlier type (whole-track, view-3, single-view), at 2 and 4 px; histograms per scene and matcher, the guard and
-  the low-inlier SIFT set, and the outlier mixture on the tuning scene. First look on 200 triplets per Cambridge
-  scene: SP+LG median w 0.84–0.94, SIFT median w 0.02–0.12, and 45% of SIFT triplets pass the guard with w < 0.4.
-- **Task 2.8, success rates and crossovers** ([`scripts/success_rates.py`](scripts/success_rates.py),
-  [`scripts/crossovers.py`](scripts/crossovers.py)): s_6, s_M, s_E and hypothesis counts from clean samples of the
-  tuning scene, then the draft's cost model (Eqs. 3–4) gives predicted crossover inlier ratios against 6pt+P3P,
-  4p3vf(M) and the sequential pipeline for each outlier type, bracketed by tracking cost and written dated. In a
-  King's College test, local optimization from the reference cameras itself meets the 2°/10% criterion on only
-  55% of triplets, and continuation endpoints never rescued a sample whose seeds all failed (s_E = 0).
+**Task 2.9, sequential baseline** (`6p3v + SEQ` in `eval_f.py`): shared-focal six-point LO-RANSAC on views 1–2,
+P3P LO-RANSAC on view 3 against the stage-1 inliers triangulated at the stage-1 focal length, then the joint
+estimator's final three-view refinement; same threshold, iteration limits and stopping rule in both stages.
+Added to the PoseLib fork in C++ ([`scripts/patches/poselib_sequential.py`](scripts/patches/poselib_sequential.py))
+with a Python binding, timed by `eval_f.py` like every other method. Exact on noise-free synthetic scenes and
+equal to the joint estimator with 0.5 px noise and 30% view-3 outliers. Results (SuperPoint+LightGlue):
+
+| Method | Cambridge AUC@10 | median error | f within 10% | ms | ETH3D AUC@10 | ms |
+|---|---|---|---|---|---|---|
+| 6pt+P3P (joint) | **54.54** | 3.80° | 60.3% | 16.9 | **70.95** | 212 |
+| 4p3vf(M) | 46.93 | 4.75° | 52.4% | 17.8 | 55.79 | 180 |
+| Sequential 6pt → P3P | 44.09 | 5.39° | 47.0% | 10.0 | 45.82 | 20 |
+
+The sequential pipeline is the fastest per call and the least accurate. It fails where the two-view shared
+focal length is far off (e.g. 944 px against 1667 px): the triangulated points are then distorted and P3P
+finds no consensus on view 3. Scoring hypotheses on all three views, as the joint estimator does, avoids this.
+
+**Task 2.8, where outliers sit** ([`scripts/outlier_stats.py`](scripts/outlier_stats.py)): every track labelled
+against the reference cameras as correct in views 1–2 (fraction a), inlier (fraction b of those, w = ab) and
+outlier type (whole-track, view-3, single-view), at 2 and 4 px, on every Cambridge and ETH3D triplet.
+- Guarded SIFT low-inlier set: 13,744 triplets with w < 0.4 (49% of 28,042); the target of 1,000 is met.
+- Outlier mixture on the tuning scene (ETH3D courtyard, SIFT): whole-track 43%, view-3 29%, view-1 18%,
+  view-2 5%, other 5%.
+
+**Task 2.8, success rates and crossovers** ([`scripts/success_rates.py`](scripts/success_rates.py),
+[`scripts/crossovers.py`](scripts/crossovers.py)): success rates from clean samples of courtyard (186 samples;
+it has 197 same-camera triplets), then the draft's cost model (Eqs. 3–4) for predicted crossover inlier ratios,
+written dated (2026-10-26) before any low-inlier run.
+- Success rates: s_6 = 0.54 (6pt+P3P), s_M = 0.42 (mean-point seeds). Continuation endpoints rescue
+  s_E = 1.8% of the samples whose seeds all fail. Local optimization from the reference cameras succeeds on
+  81% (the ceiling).
+- With the prototype's tracking time (91 ms per sample, Python) ours is 615–630× slower than 4p3vf(M) at
+  every inlier ratio, and 77–845× slower than 6pt+P3P except for whole-track outliers below w = 0.035.
+- Even with free tracking, ours is no faster than 4p3vf(M) (time ratio 0.98). It beats 6pt+P3P below
+  w = 0.87 (whole-track outliers), 0.81 (single-view) and 0.82 (measured mixture), but not for view-3 outliers,
+  and is slower than the sequential pipeline except for whole-track outliers below w = 0.24. Any time
+  advantage comes from sampling 4 points instead of 6, not from continuation.
+
+The control row 5pt+P3P+R+F (calibrated, `eval.py`) was run on the released triplets for the same comparison.
 
 ## Known issues in the seed code (fixed here)
 - **Out-of-bounds read in PoseLib@threeview's `inner_refine`** (both three-view estimators): it copies
@@ -82,6 +119,9 @@ would need a gap of 4.5 or more on its own to change the decision.
   [`scripts/eval_f_safe.py`](scripts/eval_f_safe.py) runs it unchanged with a pool that survives worker
   crashes, retries the task once and saves it for [`scripts/poselib_crash_repro.py`](scripts/poselib_crash_repro.py)
   (gdb backtrace).
+- `eval_f.py` never sets the RANSAC seed (PoseLib's default is 0), so repeating a run repeats its RANSAC
+  draws. [`scripts/patches/threeview_seed.py`](scripts/patches/threeview_seed.py) reads it from `EVALF_SEED`;
+  kill test A uses seeds 0–2.
 - `eval_f.py` scores the focal length against view 1 only (`gt_focal_2/3` read `img1`); the released
   `ThreeViewSharedFocalRelativePoseEstimator::delta` dehomogenizes the shifted point by its y coordinate.
   Both left as released and noted.
@@ -99,7 +139,8 @@ Steps, in default order (each skips work already done; name steps to run only th
 patches, fork rebuild when the installed fork was not built from the current patches, import checks),
 `machine` (Task 1.3 machine sheet), `monodromy`, `triplets` (Cambridge SP+LG, resumable), `eth3d` (every
 qualifying triplet within one camera block, at most `ETH_N=2000` per scene), `sift`, `evalf` (Tzamos et al.'s `eval_f.py` via the
-crash-safe wrapper), `killB`, `killA`, `seq` (Task 2.9), `control` (5pt+P3P+R+F), `task28` (Task 2.8),
+crash-safe wrapper), `killB`, `killA` (three RANSAC seeds, then `stats`), `seq` (Task 2.9), `control`
+(5pt+P3P+R+F), `task28` (Task 2.8),
 `compare`, `crashdebug`, `collect` (copy to the SSD, flushed; eject before unplugging). All datasets are
 built before any evaluation. `fresh` archives earlier results to `results/archive/<time>/` (and
 `third_party/threeview/results/archive_<time>/`, the SSD copy to `abl_dell_results_<time>/`); triplets and
@@ -146,11 +187,13 @@ scripts/cambridge_nvm_to_colmap.py  Cambridge reconstruction.nvm -> COLMAP model
 scripts/filter_same_camera.py   keep triplets whose three images share one intrinsics block (ETH3D)
 scripts/compare_tzamos_focal.py pool shared-focal eval_f.py results per dataset (AUC, runtime, focal error)
 scripts/runtime_single_core.sh  main estimators on one pinned core, CPU model recorded (timing window only)
-scripts/kill_test_a.py          kill test A: 6p3v vs the best re-fitted mean-point variant, two-level bootstrap
+scripts/kill_test_a.py          kill test A, first check: 6p3v vs the best re-fitted mean-point variant (one run)
+scripts/kill_test_stats.py      both kill tests with paired intervals, scene-aware and selection-aware bootstraps
+scripts/check_triplets.py       triplet files on the SSD complete and readable (run by setup)
 scripts/eval_f_safe.py          run eval_f.py unchanged with a pool that survives poselib crashes
 scripts/poselib_crash_repro.py  replay one saved crashing task (gdb backtrace)
 scripts/patches/poselib_*.py    source edits on the fork at build time: OOB fixes, kill test A refit, Task 2.9 sequential
-scripts/patches/threeview_*.py  eval_f.py labels: '+ ENM' (two-view refit), '+ SEQ' (sequential baseline)
+scripts/patches/threeview_*.py  eval_f.py: '+ ENM' (two-view refit), '+ SEQ' (sequential baseline), EVALF_SEED
 scripts/outlier_stats.py        Task 2.8: track labels a / b / w, outlier types, histograms, guard, low-inlier set
 scripts/success_rates.py        Task 2.8: s_6, s_M, s_E and hypothesis counts on the tuning scene
 scripts/crossovers.py           Task 2.8: predicted crossover inlier ratios from the cost model, dated

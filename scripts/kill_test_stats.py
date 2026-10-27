@@ -152,8 +152,9 @@ def kill_b(paths, B, rng):
                                                           pooled["ci_two_level"][1]) < TARGET_B))
     prac = compare(np.sum([paired_counts(seeded[s], "cont", "lm", "practical") for s in scenes], 0))
     res["practical_all_seeded"] = prac
-    sec = {m: compare(np.sum([paired_counts(strict[s], "cont", m, "strict") for s in scenes], 0))
-           for m in ("lm", "newton_hom", "newton")}
+    some = next(r for s in scenes for r in strict[s])
+    others = ["lm"] + [m for m, v in some.items() if isinstance(v, dict) and "strict" in v and m not in ("cont", "lm")]
+    sec = {m: compare(np.sum([paired_counts(strict[s], "cont", m, "strict") for s in scenes], 0)) for m in others}
     for m, a in zip(sec, holm(np.array([sec[m]["p"] for m in sec]))):
         sec[m]["p_holm"] = float(a)
     res["cont_vs"] = sec
@@ -183,7 +184,7 @@ def report_b(r):
           f"- Sensitivity, 'practical' success on all {r['practical_all_seeded']['n']} seeded samples: cont - LM = "
           f"{pp(r['practical_all_seeded']['diff'])} pp [{pp(r['practical_all_seeded']['ci'][0])}, "
           f"{pp(r['practical_all_seeded']['ci'][1])}], McNemar p = {r['practical_all_seeded']['p']:.2g}.",
-          "- Continuation against each other method (strict, Holm over the three): " + "; ".join(
+          "- Continuation against each other method (strict, Holm over all of them): " + "; ".join(
               f"{m} {pp(c['diff'])} pp [{pp(c['ci'][0])}, {pp(c['ci'][1])}], p_Holm = {c['p_holm']:.2g}"
               for m, c in r["cont_vs"].items()) + ".", "",
           f"KILL TEST B: cont - LM = {d['diff_pp']:+.1f} pp (needs >= +{TARGET_B:.0f}), McNemar p = {d['p']:.2g} -> "
@@ -251,7 +252,7 @@ def kill_a(results, feat, B, rng):
                auc={m: float(a) for m, a in zip(methods, auc)}, gap={v: float(x) for v, x in zip(enm, g)},
                best=enm[best], gap_best=float(g[best]))
     # bootstrap: stratified (scenes fixed) and two-level (scenes resampled), the best variant re-selected each time
-    sel_st, fix_st, sel_tl, all_st = [], [], [], []
+    sel_st, fix_st, sel_tl, fix_tl, all_st = [], [], [], [], []
     chunk = 100
     for _ in range(0, B, chunk):
         means = np.stack([S[s][rng.integers(0, len(S[s]), (chunk, len(S[s])))].mean(1) for s in scenes], 1)
@@ -260,11 +261,13 @@ def kill_a(results, feat, B, rng):
         sel_st.append(gb.min(1)), fix_st.append(gb[:, best]), all_st.append(gb)
         pick = rng.integers(0, len(scenes), (chunk, len(scenes)))
         auc_t = means[np.arange(chunk)[:, None], pick].mean(1)
-        sel_tl.append((auc_t[:, :1] - auc_t[:, 1:]).min(1))
-    sel_st, fix_st, sel_tl, all_st = map(np.concatenate, (sel_st, fix_st, sel_tl, all_st))
+        gt = auc_t[:, :1] - auc_t[:, 1:]
+        sel_tl.append(gt.min(1)), fix_tl.append(gt[:, best])
+    sel_st, fix_st, sel_tl, fix_tl, all_st = map(np.concatenate, (sel_st, fix_st, sel_tl, fix_tl, all_st))
     res.update(ci_selected_stratified=np.percentile(sel_st, [2.5, 97.5]).tolist(),
                ci_selected_two_level=np.percentile(sel_tl, [2.5, 97.5]).tolist(),
                ci_fixed_best_stratified=np.percentile(fix_st, [2.5, 97.5]).tolist(),
+               ci_fixed_best_two_level=np.percentile(fix_tl, [2.5, 97.5]).tolist(),
                share_gap_ge_target=dict(stratified=float(np.mean(sel_st >= TARGET_A)),
                                         two_level=float(np.mean(sel_tl >= TARGET_A))),
                ci_variant_stratified={v: np.percentile(all_st[:, i], [2.5, 97.5]).tolist()
@@ -309,8 +312,8 @@ def report_a(r, feat):
     d = r["decision"]
     L += ["", f"- Best re-fitted variant: {r['best']}; gap {f2(r['gap_best'])} AUC@10.",
           f"- 95 % CI with the best re-selected in each replicate: stratified {ci(r['ci_selected_stratified'])}, "
-          f"two-level {ci(r['ci_selected_two_level'])}; keeping {r['best']} fixed: "
-          f"{ci(r['ci_fixed_best_stratified'])}.",
+          f"two-level {ci(r['ci_selected_two_level'])}; keeping {r['best']} fixed: stratified "
+          f"{ci(r['ci_fixed_best_stratified'])}, two-level {ci(r['ci_fixed_best_two_level'])}.",
           f"- Share of bootstrap replicates with gap >= {TARGET_A}: stratified "
           f"{100 * r['share_gap_ge_target']['stratified']:.1f} %, two-level {100 * r['share_gap_ge_target']['two_level']:.1f} %.",
           "- Gap per scene: " + ", ".join(f"{s} {f2(x)}" for s, x in r["per_scene_gap_best"].items()) + ".",

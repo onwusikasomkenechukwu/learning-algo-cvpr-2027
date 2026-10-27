@@ -280,7 +280,7 @@ def _add(sols, z, tol=1e-6):
     return True
 
 
-def monodromy(rng, stable_loops=5, max_loops=60, log=print):
+def monodromy(rng, stable_loops=5, max_loops=60, log=print, save=None):
     inst = M.random_instance(rng)
     pA = (rng.normal(size=(3, 4, 2)) + 1j * rng.normal(size=(3, 4, 2))) * 0.3
     gamma = np.exp(2j * np.pi * rng.uniform())
@@ -311,6 +311,8 @@ def monodromy(rng, stable_loops=5, max_loops=60, log=print):
         history.append(len(sols))
         quiet = quiet + 1 if new == 0 else 0
         log(f"  loop {loops}: {len(sols)} solutions (+{new}), {time.time() - t0:.0f} s")
+    if save is not None:   # the full root set at pA: start system for full solves (src/full_solve_check.py)
+        np.savez(save, pA=pA, sols=np.array(sols))
     # classify at pA: eps_i = v_i / v_1 (= +-1 for every root, complex ones included, by Cayley-Menger)
     classes, zero_vol, zero_depth, omega0 = {}, 0, 0, 0
     for z in sols:
@@ -335,6 +337,8 @@ def main():
     ap.add_argument("--only", nargs="*", help="subset of checks to run")
     ap.add_argument("--instances", type=int, default=3, help="monodromy instances")
     ap.add_argument("--rng", type=int, default=0)
+    ap.add_argument("--save", action="store_true", help="monodromy: keep each root set as <out>/monodromy_<i>.npz")
+    ap.add_argument("--max-loops", type=int, default=60, help="monodromy loop cap (quick tests)")
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -343,7 +347,9 @@ def main():
     checks = dict(residual=lambda: check_residual(rng, scene), signs=lambda: check_signs(rng, scene),
                   omega0=lambda: check_omega0(rng), coplanar=lambda: check_coplanar(rng, out),
                   crossing=lambda: check_crossing(rng), surface=lambda: check_surface(rng, out),
-                  monodromy=lambda: [monodromy(rng) for _ in range(args.instances)])
+                  monodromy=lambda: [monodromy(rng, max_loops=args.max_loops,
+                                               save=out / f"monodromy_{i}.npz" if args.save else None)
+                                     for i in range(args.instances)])
     todo = args.only or [k for k in checks if k != "monodromy"]
     results = {}
     for name in todo:

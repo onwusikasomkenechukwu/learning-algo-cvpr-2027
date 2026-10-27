@@ -2,11 +2,15 @@
 miniature; draft v4 Secs. 4 and 6.2). Laptop-only: numpy/scipy/OpenCV, no PoseLib, no HC library.
 
 For each instance: 4p3vf(M) seeds (fourp3vf.mean_point_seeds), the seed with the shortest free-point path,
-then six ways to finish it, all from the same seed:
+then seven ways to finish it, all from the same seed (the six of Task 2.4 plus the retry):
   cont        real parameter homotopy on the seed surface: x(t) = (1 - t) x0 + t x, x0 = simulated start
   newton_hom  global Newton homotopy F(z; x) - (1 - t) F(z0; x), no class test along it
   lm          Levenberg-Marquardt on the reprojection error of the 4 tracks in 3 views, run to convergence
   newton      Newton's method on F(z; x) from z0
+  cont_retry  cont, then on failure the two L-shaped paths of the free point (Task 2.3 step 4)
+  cont_off    continuation from a start off the seed surface: the released refinement's four points
+              triangulated and projected, so every coordinate moves (Task 2.4)
+  refine2     refinement as released: two LM steps on the three-view Sampson errors of the four tracks
 The correct root comes from five complex paths (random gamma detours) from the ground truth at noise-free
 coordinates to the observed ones; samples whose paths disagree are ambiguous, and a non-real common endpoint
 means no real correct root. Strict success = endpoint at the correct root (unambiguous samples with a real
@@ -236,7 +240,148 @@ def run_lm(seed, x):
                                                cost=float(sol.cost))
 
 
-METHODS = dict(cont=run_cont, newton_hom=run_newton_hom, lm=run_lm, newton=run_newton)
+def _skew(v):
+    return np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
+
+
+def released_refine(seed, x, iters=2, loss_scale=5.0 / 800):
+    """Refinement as released in the PoseLib fork ('+ R': inner_refine = 2): iters Levenberg-Marquardt steps on
+    the Sampson errors of pairs 1-2, 1-3 and 2-3 over the sample's four tracks, Cauchy loss at the RANSAC
+    threshold (5 px, here at the 800 px normalization), damping as PoseLib's lm_impl (lambda 1e-3, x0.1 on an
+    accepted step, x10 on a rejected one, each attempt counts as an iteration). Unknowns: log f, rotation of
+    views 2 and 3, direction of t2 (2) and t3 (3). Returns (f, R, t) with R[0] = I, t[0] = 0, |t2| = |seed t2|."""
+    f0, R0, t0 = seed["f"], seed["R"], seed["t"]
+    s = np.linalg.norm(t0[1])
+    t2, t3 = t0[1] / s, t0[2] / s
+    e1 = np.cross(t2, [1.0, 0, 0] if abs(t2[0]) < 0.9 else [0, 1.0, 0])
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(t2, e1)
+
+    def unpack(q):
+        a = t2 + q[4] * e1 + q[5] * e2
+        return (f0 * np.exp(q[0]), Rotation.from_rotvec(q[1:4]).as_matrix() @ R0[1], a / np.linalg.norm(a),
+                Rotation.from_rotvec(q[6:9]).as_matrix() @ R0[2], t3 + q[9:12])
+
+    def residuals(q):
+        f, Ra, ta, Rb, tb = unpack(q)
+        Ki = np.diag([1 / f, 1 / f, 1.0])
+        out = []
+        for (i, j), (R, t) in (((0, 1), (Ra, ta)), ((0, 2), (Rb, tb)), ((1, 2), (Rb @ Ra.T, tb - Rb @ Ra.T @ ta))):
+            Fm = Ki @ _skew(t) @ R @ Ki
+            hi, hj = np.column_stack([x[i], np.ones(4)]), np.column_stack([x[j], np.ones(4)])
+            Fx, Ftx = hi @ Fm.T, hj @ Fm
+            out.append(np.einsum("ni,ni->n", hj, Fx) / np.sqrt(Fx[:, 0] ** 2 + Fx[:, 1] ** 2 + Ftx[:, 0] ** 2
+                                                              + Ftx[:, 1] ** 2))
+        return np.concatenate(out)
+
+    def cost_w(r):                                    # Cauchy loss and its IRLS weights
+        u = (r / loss_scale) ** 2
+        return 0.5 * loss_scale ** 2 * np.log1p(u).sum(), 1 / (1 + u)
+
+    q, lam = np.zeros(12), 1e-3
+    r = residuals(q)
+    if not np.isfinite(r).all():
+        return None
+    cost, w = cost_w(r)
+    for _ in range(iters):
+        J = np.empty((len(r), 12))
+        for k in range(12):                           # forward differences
+            dq = np.zeros(12)
+            dq[k] = 1e-7
+            J[:, k] = (residuals(q + dq) - r) / 1e-7
+        JtJ, Jtr = J.T @ (w[:, None] * J), J.T @ (w * r)
+        try:
+            step = np.linalg.solve(JtJ + lam * np.eye(12), -Jtr)
+        except np.linalg.LinAlgError:
+            break
+        r_new = residuals(q + step)
+        c_new, w_new = cost_w(r_new) if np.isfinite(r_new).all() else (np.inf, None)
+        if c_new < cost:
+            q, r, cost, w, lam = q + step, r_new, c_new, w_new, lam / 10
+        else:
+            lam *= 10
+    f, Ra, ta, Rb, tb = unpack(q)
+    return f, np.array([np.eye(3), Ra, Rb]), np.array([np.zeros(3), ta * s, tb * s])
+
+
+def triangulate3(f, R, t, x):
+    """Linear triangulation of the four tracks from all three views (camera-1 frame)."""
+    out = []
+    for j in range(x.shape[1]):
+        A = []
+        for i in range(3):
+            P = np.hstack([R[i], t[i][:, None]])
+            u = x[i, j] / f
+            A += [u[0] * P[2] - P[0], u[1] * P[2] - P[1]]
+        X = np.linalg.svd(np.array(A))[2][-1]
+        out.append(X[:3] / X[3])
+    return np.array(out)
+
+
+def run_refine2(seed, x):
+    """Two LM steps as released; the result is a scene, so its depths give z (not an exact root of F)."""
+    ref = released_refine(seed, x)
+    if ref is None:
+        return None, dict(reason="nonfinite", steps=0)
+    f, R, t = ref
+    X = triangulate3(f, R, t, x)
+    if not np.isfinite(X).all() or f <= 0:
+        return None, dict(reason="nonfinite", steps=2)
+    return root_from_scene_safe(f, R, t, X), dict(reason="two_steps", steps=2)
+
+
+def root_from_scene_safe(f, R, t, X):
+    lam = np.stack([X @ R[i].T + t[i] for i in range(3)])[..., 2]
+    return None if abs(lam[0, 0]) < 1e-12 else M.root_from_scene(f, R, t, X)
+
+
+def run_cont_off(seed, x):
+    """Continuation from a start off the seed surface built from the refined seed (Task 2.4): the released
+    refinement, its four points triangulated from all three views and projected, so every coordinate moves."""
+    ref = released_refine(seed, x)
+    if ref is None:
+        return None, dict(reason="nonfinite", steps=0)
+    f, R, t = ref
+    X = triangulate3(f, R, t, x)
+    if not np.isfinite(X).all() or f <= 0 or (np.stack([X @ R[i].T + t[i] for i in range(3)])[..., 2] <= 0).any():
+        return None, dict(reason="bad_start", steps=0)
+    x0, z0 = M.project(f, R, t, X), M.root_from_scene(f, R, t, X)
+    mon = class_monitor(x0, x, M.orientation_class(z0, x0))
+    r = track(parameter_homotopy(x0, x), z0, mon)
+    return r["z"] if r["ok"] else None, r
+
+
+def run_cont_retry(seed, x):
+    """Continuation with the retry of Task 2.3 step 4: if the straight path fails, the two L-shaped paths that
+    move the free point first horizontally then vertically, or the other way round."""
+    z, r = run_cont(seed, x)
+    if z is not None:
+        return z, dict(r, retry=0)
+    x0, cls0 = seed["x0"], M.orientation_class(seed["z0"], seed["x0"])
+    for k, order in enumerate(((0, 1), (1, 0)), start=1):
+        zz, xa, steps, events, ok = seed["z0"], x0, 0, [], True
+        cls = cls0
+        for c in order:
+            xb = xa.copy()
+            xb[2, 3, c] = x[2, 3, c]
+            mon = class_monitor(xa, xb, cls)
+            rr = track(parameter_homotopy(xa, xb), zz, mon)
+            steps += rr["steps"]
+            events += rr["events"]
+            if not rr["ok"]:
+                ok = False
+                break
+            zz, xa = rr["z"], xb
+            if M.planarity(M.camera_points(zz, xa)) > S["planar_thr"]:
+                cls = M.orientation_class(zz, xa)
+        if ok:
+            return zz, dict(ok=True, z=zz, steps=r["steps"] + steps, reason=f"retry_L{k}", events=r["events"] + events,
+                            retry=k)
+    return None, dict(r, retry=-1)
+
+
+METHODS = dict(cont=run_cont, cont_retry=run_cont_retry, newton_hom=run_newton_hom, cont_off=run_cont_off,
+               lm=run_lm, refine2=run_refine2, newton=run_newton)
 
 
 # ---------------------------------------------------------------- correct root
@@ -301,7 +446,10 @@ def run_instance(inst, rng, seed_mode):
         row[name] = dict(ms=dt, reason=info.get("reason"), steps=info.get("steps"), accepted=acc, check=why,
                          strict=bool(zc is not None and same_root(z, zc)), practical=prac, rot_err=rerr,
                          f_err=ferr, events=[e["kind"] for e in info.get("events", [])],
-                         t_stop=info.get("t"), sv_ratio=info.get("sv_ratio"))
+                         t_stop=info.get("t"), sv_ratio=info.get("sv_ratio"), retry=info.get("retry"),
+                         # relative distance to the correct root (the released refinement never lands on a root)
+                         dist=float(np.linalg.norm(z - zc) / (1 + np.linalg.norm(zc)))
+                         if zc is not None and z is not None and np.isfinite(z).all() else None)
     return row
 
 

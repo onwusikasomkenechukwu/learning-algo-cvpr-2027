@@ -26,7 +26,14 @@ CC_BLOCK = r"""// Sequential baseline (Task 2.9): shared-focal six-point LO-RANS
 RansacStats estimate_3v_shared_focal_sequential(const std::vector<Point2D> &x1, const std::vector<Point2D> &x2,
                                                 const std::vector<Point2D> &x3, const RansacOptions &ransac_opt,
                                                 const BundleOptions &bundle_opt, ImageTriplet *image_triplet,
-                                                std::vector<char> *inliers, const Point2D &pp) {
+                                                std::vector<char> *inliers, const Point2D &pp,
+                                                std::vector<double> *diag) {
+    const auto tic = std::chrono::steady_clock::now();
+    auto ms_since = [](std::chrono::steady_clock::time_point a) {
+        return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - a).count();
+    };
+    double ms1 = 0.0, ms2 = 0.0;
+    size_t inl3 = 0;
     const size_t num_pts = x1.size();
     std::vector<Point2D> x1_norm = x1;
     std::vector<Point2D> x2_norm = x2;
@@ -76,6 +83,8 @@ RansacStats estimate_3v_shared_focal_sequential(const std::vector<Point2D> &x1, 
         refine_shared_focal_relpose(x1_in, x2_in, &pair, bundle_opt_scaled);
     }
     pair.camera2 = pair.camera1;
+    ms1 = ms_since(tic);
+    const auto tic2 = std::chrono::steady_clock::now();
 
     // Stage 2: view 3 by P3P against the stage-1 inliers, triangulated at the stage-1 focal length
     const double f = pair.camera1.focal();
@@ -97,10 +106,13 @@ RansacStats estimate_3v_shared_focal_sequential(const std::vector<Point2D> &x1, 
         opt3.max_reproj_error = opt.max_epipolar_error / f;
         std::vector<char> inliers3;
         RansacStats stats3 = ransac_pnp(x3_calib, X, opt3, &pose13, &inliers3);
+        inl3 = stats3.num_inliers;
         stats.iterations += stats3.iterations;
         stats.refinements += stats3.refinements;
     }
     *image_triplet = ImageTriplet(ThreeViewCameraPose(pair.pose, pose13), pair.camera1);
+    ms2 = ms_since(tic2);
+    const auto tic3 = std::chrono::steady_clock::now();
 
     // Finish: the final three-view refinement of the joint estimator
     if (X.size() >= 4) {
@@ -124,6 +136,9 @@ RansacStats estimate_3v_shared_focal_sequential(const std::vector<Point2D> &x1, 
     image_triplet->camera.params[0] *= scale;
     image_triplet->camera.params[1] = pp(0);
     image_triplet->camera.params[2] = pp(1);
+    if (diag != nullptr)   // stage times (ms) and counts: stage-1 inliers, triangulated points, P3P inliers, final
+        *diag = {ms1, ms2, ms_since(tic3), static_cast<double>(stats12.num_inliers), static_cast<double>(X.size()),
+                 static_cast<double>(inl3), static_cast<double>(stats.num_inliers)};
     return stats;
 }
 
@@ -135,7 +150,8 @@ H_BLOCK = """// Sequential baseline (Task 2.9): shared-focal six-point LO-RANSAC
 RansacStats estimate_3v_shared_focal_sequential(const std::vector<Point2D> &x1, const std::vector<Point2D> &x2,
                                                 const std::vector<Point2D> &x3, const RansacOptions &ransac_opt,
                                                 const BundleOptions &bundle_opt, ImageTriplet *image_triplet,
-                                                std::vector<char> *inliers, const Point2D &pp);
+                                                std::vector<char> *inliers, const Point2D &pp,
+                                                std::vector<double> *diag = nullptr);
 
 """
 
@@ -157,10 +173,15 @@ estimate_three_view_shared_focal_sequential_wrapper(const std::vector<Eigen::Vec
     ImageTriplet image_triplet;
     std::vector<char> inlier_mask;
 
+    std::vector<double> diag;
     RansacStats stats = estimate_3v_shared_focal_sequential(points2D_1, points2D_2, points2D_3, ransac_opt,
-                                                            bundle_opt, &image_triplet, &inlier_mask, pp);
+                                                            bundle_opt, &image_triplet, &inlier_mask, pp, &diag);
     py::dict output_dict;
     write_to_dict(stats, output_dict);
+    const char *names[] = {"stage1_ms", "stage2_ms", "final_ms", "stage1_inliers", "triangulated",
+                           "stage2_inliers", "final_inliers"};
+    for (size_t k = 0; k < diag.size(); ++k)
+        output_dict[names[k]] = diag[k];
     output_dict["inliers"] = convert_inlier_vector(inlier_mask);
     return std::make_pair(image_triplet, output_dict);
 }
@@ -183,6 +204,10 @@ def insert_before(path, anchor, block):
     path.write_text(text.replace(anchor, block + anchor))
 
 
+INC_ANCHOR = '#include "robust.h"\n'
+INC_BLOCK = "#include <chrono>\n"
+
+
 def main():
     root = Path(sys.argv[1])
     cc, h, py = root / "PoseLib" / "robust.cc", root / "PoseLib" / "robust.h", root / "pybind" / "pyposelib.cc"
@@ -190,6 +215,7 @@ def main():
         print(f"sequential baseline already in {root}")
         return
     insert_before(cc, CC_ANCHOR, CC_BLOCK)
+    insert_before(cc, INC_ANCHOR, INC_BLOCK)
     insert_before(h, H_ANCHOR, H_BLOCK)
     insert_before(py, PY_ANCHOR, PY_BLOCK)
     insert_before(py, DEF_ANCHOR, DEF_BLOCK)

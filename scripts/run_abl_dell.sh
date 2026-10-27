@@ -16,6 +16,9 @@
 #   killA      Kill test A: the re-fitted mean-point rows ('+ ENM') per Cambridge scene, three runs (RANSAC seeds
 #              0-2: KA_RUNS), decide (best re-fitted variant trails 6p3v by >= 2.0 AUC@10), then stats
 #   stats      both kill tests with intervals (scripts/kill_test_stats.py -> results/abl_dell/kill_test_stats.md)
+#   followup   (not default) Dr. Aryal's 2026-10-27 requests: kill test B with all six methods and the retry, the
+#              Task 2.3 synthetic test, the full-solve check, baselines over three runs, the refit on ETH3D, Task 2.9
+#              stage times, Task 2.8 with the refit and sequential stages (new dated predictions), stats
 #   seq        Task 2.9 sequential baseline ('6p3v + SEQ') per finished scene, next to 6pt+P3P
 #   task28     Task 2.8 outlier labels / histograms / low-inlier set / mixture, success rates on courtyard,
 #              predicted crossovers (results/task28/predictions_{tracking,free}.md)
@@ -261,14 +264,16 @@ step_evalf() {
   done < <(finished_dirs)
 }
 
+# The re-fitted mean-point rows of kill test A (two-view refit, '+ ENM')
+KA_EXPS="4p3v(M) + ENM;4p3v(M) + R + ENM;4p3v(M) + R + C + ENM;4p3v(M-D) + ENM;4p3v(M-D) + R + ENM;4p3v(M-D) + R + C + ENM"
+
 step_killA() {
   # Kill test A (Tasks 1.9 / 2.2): the mean-point family with the two-view refit ('+ ENM') against 6pt+P3P on
   # the five Cambridge scenes. The fork is rebuilt once with scripts/patches/poselib_shared_focal_refit.py.
   fork_current || { log "killA: the fork lacks the refit (see setup); kill test A skipped"; return; }
   "$PY" scripts/patches/threeview_enm.py "$TV" || { log "killA: could not map '+ ENM' in eval_f.py"; return; }
   "$PY" scripts/patches/threeview_seed.py "$TV" || { log "killA: could not add EVALF_SEED to eval_f.py"; return; }
-  local exps="4p3v(M) + ENM;4p3v(M) + R + ENM;4p3v(M) + R + C + ENM;4p3v(M-D) + ENM;4p3v(M-D) + R + ENM;4p3v(M-D) + R + C + ENM"
-  local s k
+  local exps=$KA_EXPS s k
   for s in "${SCENES[@]}"; do
     cam_done "$s" || { log "killA: skip $s (triplets not finished)"; continue; }
     run_evalf "$TRIP/$s" "$FEAT" "" || true                      # 6p3v and the plain rows (RANSAC seed 0)
@@ -315,6 +320,56 @@ step_killB() {
   done
   (( ${#files[@]} )) || { log "killB: no finished scenes"; return; }
   "$PY" -W ignore src/homotopy_proto.py --merge "${files[@]}" --out "$OUT/killB" | tee "$OUT/killB.txt"
+}
+
+step_followup() {
+  # Dr. Aryal's requests of 2026-10-27 that need new runs (SP+LG only: no method touches the low-inlier SIFT set
+  # before the Task 2.8 predictions with the refit are dated)
+  local ts s k fs_pid
+  ts=$(date +%Y%m%d_%H%M)
+  # full-solve check of the correct-root tool (Task 2.3 step 7 / 2.4 step 5): monodromy root set (~3 h, one core),
+  # then 100 synthetic and 100 King's College samples; in the background while the rest runs
+  mkdir -p "$OUT/fullsolve"
+  ( OMP_NUM_THREADS=1 "$PY" -u -W ignore src/check_fourp3vf.py --only monodromy --instances 1 --rng 10 --save \
+      --out "$OUT/fullsolve" >"$OUT/fullsolve_monodromy.log" 2>&1 \
+    && OMP_NUM_THREADS=1 "$PY" -u -W ignore src/full_solve_check.py --start "$OUT/fullsolve/monodromy_0.npz" \
+      --mode random --n 100 --noise 1 --nproc "$NW" --out "$OUT/fullsolve/random" >"$OUT/fullsolve_random.log" 2>&1 \
+    && OMP_NUM_THREADS=1 "$PY" -u -W ignore src/full_solve_check.py --start "$OUT/fullsolve/monodromy_0.npz" \
+      --mode triplets --scene "$TRIP/KingsCollege" --nvm "$CAM/KingsCollege/reconstruction.nvm" --n 100 \
+      --nproc "$NW" --out "$OUT/fullsolve/KingsCollege" >"$OUT/fullsolve_KingsCollege.log" 2>&1 ) &
+  fs_pid=$!
+  log "followup: full-solve check started in the background (logs $OUT/fullsolve_*.log)"
+  # kill test B with all six methods of Task 2.4 plus the L-shaped retry (the four-method run is kept aside)
+  if [[ -d $ROOT/results/killB && ! -f $ROOT/results/killB/.seven_methods ]]; then
+    mv "$ROOT/results/killB" "$ROOT/results/killB_4methods_$ts"
+    mv "$OUT/killB.txt" "$OUT/killB_4methods_$ts.txt" 2>/dev/null
+  fi
+  mkdir -p "$ROOT/results/killB" && touch "$ROOT/results/killB/.seven_methods"
+  step_killB
+  # Task 2.3 test: 100 synthetic instances with seeds = ground truth disturbed by 1-10 degrees, all methods
+  OMP_NUM_THREADS=1 "$PY" -W ignore src/homotopy_proto.py --n 100 --noise 0 1 --seeds disturbed --rng 3 \
+    --out "$OUT/task23_disturbed" >"$OUT/task23_disturbed.log" 2>&1 || log "followup: Task 2.3 test failed"
+  # kill test A baselines over three runs too (4p3vf(M), 4p3vf(M)+R; 6pt+P3P already has three)
+  for s in "${SCENES[@]}"; do
+    for k in 1 2; do EVALF_SEED=$k run_evalf "$TRIP/$s" "$FEAT" "base-s$k" --exps "4p3v(M);4p3v(M) + R" || true; done
+  done
+  # the refit on every ETH3D scene (SP+LG, seed 0); courtyard also gives Task 2.8 its per-sample time
+  for s in "${ETH_SCENES[@]}"; do
+    eth_done "$s" && { run_evalf "$ETRIP/$s" "$FEAT" killA --exps "$KA_EXPS" || true; }
+  done
+  # Task 2.9 stage times and counts (rebuilt fork): King's College and courtyard
+  run_evalf "$TRIP/KingsCollege" "$FEAT" seqt --exps "6p3v + SEQ" || true
+  eth_done courtyard && { run_evalf "$ETRIP/courtyard" "$FEAT" seqt --exps "6p3v + SEQ" || true; }
+  # Task 2.8 again with the refit and the sequential stages; the 2026-10-26 predictions are kept under their date
+  local t28=$ROOT/results/task28 f
+  for f in "$t28"/predictions_*.md "$t28"/predictions_*.json "$t28/success.json"; do
+    [[ -f $f && $f != *_2026-* ]] && mv "$f" "${f%.*}_$(date -r "$f" +%F).${f##*.}"
+  done
+  step_task28
+  step_stats
+  log "followup: waiting for the full-solve check"
+  wait "$fs_pid"
+  log "followup: full-solve check done ($OUT/fullsolve/*_summary.json)"
 }
 
 step_requeue() {
@@ -487,6 +542,10 @@ step_status() {
   [[ -f $OUT/task28_outliers.log ]] && grep -a "guarded SIFT" "$OUT/task28_outliers.log" | sed "s/^/Task 2.8: /"
   [[ -f $OUT/task28_success.log ]] && grep -a "^ceiling" "$OUT/task28_success.log" | sed "s/^/Task 2.8: /"
   ls "$ROOT"/results/task28/predictions_*.md 2>/dev/null | sed "s/^/Task 2.8 predictions: /"
+  local fl
+  for fl in "$OUT"/fullsolve_*.log; do
+    [[ -f $fl ]] && echo "$(basename "$fl"): $(tail -c 300 "$fl" | tr '\r' '\n' | grep -a -v '^\s*$' | tail -1 | cut -c1-150)"
+  done
   echo "== last log lines"; tail -4 "$OUT/run.log" 2>/dev/null
   if [[ -f $OUT/runner.pid ]] && kill -0 "$(cat "$OUT/runner.pid")" 2>/dev/null; then
     echo "runner: RUNNING"

@@ -22,6 +22,10 @@
 #   seq        Task 2.9 sequential baseline ('6p3v + SEQ') per finished scene, next to 6pt+P3P
 #   task28     Task 2.8 outlier labels / histograms / low-inlier set / mixture, success rates on courtyard,
 #              predicted crossovers (results/task28/predictions_{tracking,free}.md)
+#   semisynth  draft v5 Sec. 5.1 semi-synthetic outliers: 500 Cambridge SP+LG triplets per scene with w > 0.8, real
+#              inliers kept, whole-track / view-3 / single-view / measured-mixture outliers added to w = 0.75, 0.5,
+#              0.35, 0.25 (scripts/semisynth_outliers.py -> $SSD/data/semisynth; needs task28's summary.json).
+#              Generation only: no method runs on these triplets here
 #   control    5pt+P3P+R+F control row (eval.py '5p3v + R + C') on the released triplets, own results file
 #   eth3d      ETH3D SP+LG triplets (12 scenes, 800 px): every image triplet within one intrinsics block that passes
 #              the overlap test, at most ETH_N = 2000 per scene (Tasks 1.4 / 1.6)
@@ -383,7 +387,7 @@ step_requeue() {
 }
 
 # Every job the runner starts (the processes left behind when the runner itself is stopped)
-JOBS='eval_f_safe.py|homotopy_proto.py|check_fourp3vf.py|prepare_triplets.py|sift_triplets.py|outlier_stats.py|success_rates.py|poselib_crash_repro.py|run_tzamos_table.sh|build_seed_code.sh|machine_sheet.sh'
+JOBS='eval_f_safe.py|homotopy_proto.py|check_fourp3vf.py|prepare_triplets.py|sift_triplets.py|outlier_stats.py|semisynth_outliers.py|success_rates.py|poselib_crash_repro.py|run_tzamos_table.sh|build_seed_code.sh|machine_sheet.sh'
 
 step_stop() {   # stop the background runner and every job it started, monodromy included
   local pid
@@ -474,6 +478,17 @@ step_task28() {
   log "task28: predictions in $t28/predictions_{tracking,free}.md (copy them into the lab notebook, dated)"
 }
 
+step_semisynth() {
+  local t28=$ROOT/results/task28/summary.json dst=$SSD/data/semisynth
+  [[ -f $t28 ]] || { log "semisynth: $t28 missing (task28 step); skipped"; return; }
+  "$PY" -W ignore scripts/semisynth_outliers.py --cambridge "$TRIP" --nvm-root "$CAM" --outliers "$t28" \
+    --theta "${THETA:-2.0}" --out "$dst" >"$OUT/semisynth.log" 2>&1 \
+    || { log "semisynth: failed (see $OUT/semisynth.log)"; return; }
+  cp "$dst/manifest.json" "$OUT/semisynth_manifest.json"
+  grep -a "triplets, median" "$OUT/semisynth.log"
+  log "semisynth: triplets in $dst (manifest copied to $OUT)"
+}
+
 step_control() {
   [[ -f $OUT/control.done ]] && { log "control row already done"; return; }
   "${ONE_THREAD[@]}" bash scripts/run_tzamos_table.sh --exps "5p3v + R + C" --tag control >"$OUT/control.log" 2>&1 \
@@ -541,6 +556,7 @@ step_status() {
   [[ -f $OUT/seq.txt ]] && grep -a -E "^(6p3v|6p3v \+ SEQ) " "$OUT/seq.txt" | sed "s/^/Task 2.9: /"
   [[ -f $OUT/task28_outliers.log ]] && grep -a "guarded SIFT" "$OUT/task28_outliers.log" | sed "s/^/Task 2.8: /"
   [[ -f $OUT/task28_success.log ]] && grep -a "^ceiling" "$OUT/task28_success.log" | sed "s/^/Task 2.8: /"
+  [[ -f $OUT/semisynth.log ]] && grep -a -E "triplets, median|only .* qualify|Error" "$OUT/semisynth.log" | sed "s/^/semisynth: /"
   ls "$ROOT"/results/task28/predictions_*.md 2>/dev/null | sed "s/^/Task 2.8 predictions: /"
   local fl
   for fl in "$OUT"/fullsolve_*.log; do
@@ -555,7 +571,7 @@ step_status() {
 }
 
 # Every dataset first (Cambridge and ETH3D triplets, SIFT tracks), then the evaluations on complete data.
-DEFAULT=(setup machine monodromy triplets eth3d sift evalf killB killA seq control task28 compare crashdebug collect)
+DEFAULT=(setup machine monodromy triplets eth3d sift evalf killB killA seq control task28 semisynth compare crashdebug collect)
 
 main() {
   # Bash variables are visible to called functions: these names must not be used by any step (2026-10-26 the

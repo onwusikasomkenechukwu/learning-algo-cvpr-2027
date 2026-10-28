@@ -197,6 +197,7 @@ scripts/patches/threeview_*.py  eval_f.py: '+ ENM' (two-view refit), '+ SEQ' (se
 scripts/outlier_stats.py        Task 2.8: track labels a / b / w, outlier types, histograms, guard, low-inlier set
 scripts/success_rates.py        Task 2.8: s_6, s_M, s_E and hypothesis counts on the tuning scene
 scripts/crossovers.py           Task 2.8: predicted crossover inlier ratios from the cost model, dated
+scripts/semisynth_outliers.py   semi-synthetic outliers (whole-track / view-3 / single-view / mixture) on Cambridge
 scripts/make_hruby_data.sh      Hruby Sec. 5.1 data split from ETH3D (anchors / val / train)
 scripts/run_baseline.sh         2-view baseline sweep on the RANSAC tutorial val split
 scripts/download_tier1.sh       dataset downloads (online machine)

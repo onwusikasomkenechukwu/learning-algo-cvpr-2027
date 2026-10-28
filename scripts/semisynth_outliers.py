@@ -132,6 +132,8 @@ def draw(kinds, views, sigma, depth, thr, rng, max_rounds=200):
             fin = np.isfinite(p).all(1)               # (non-finite ones keep the random pixel and are rejected)
             ok[sel] = fin & (zd > 0) & views[dst].inside(views[dst].distort(np.where(fin[:, None], p, 0)))
             cand[dst][sel[fin]] = p[fin]
+        # label what will be written: stored pixels undistorted again (the radial map is not invertible far out)
+        cand = [v.undistort(v.distort(c)) for v, c in zip(views, cand)]
         c12, c13, c23, inl = label_tracks(cand, [v.K for v in views], [v.R for v in views], [v.T for v in views], thr)
         good = ok & ~inl & np.select(
             [k == "whole", k == "view1", k == "view2", k == "view3"],

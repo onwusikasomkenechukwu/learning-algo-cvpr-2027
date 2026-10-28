@@ -198,6 +198,15 @@ scripts/outlier_stats.py        Task 2.8: track labels a / b / w, outlier types,
 scripts/success_rates.py        Task 2.8: s_6, s_M, s_E and hypothesis counts on the tuning scene
 scripts/crossovers.py           Task 2.8: predicted crossover inlier ratios from the cost model, dated
 scripts/semisynth_outliers.py   semi-synthetic outliers (whole-track / view-3 / single-view / mixture) on Cambridge
+scripts/eval_sets.py            draft v5 evaluation sets: guarded SIFT (primary w < 0.4), SP+LG, timing subsets
+scripts/mr_config.py            draft v5 methods, iteration grids and sets (shared by the runner and the analysis)
+scripts/matched_runtime.py      matched-runtime AUC@10, primary test, inlier-ratio bins, crossovers, Fig. 2
+scripts/paper_tables.py         Tables 1 and 3 of draft v5 as LaTeX rows from the result files
+scripts/geocalib_focals.py      GeoCalib focal lengths (focal-prior row; runs in .venv-nets)
+scripts/vggt_cameras.py         VGGT cameras (network row; runs in .venv-nets)
+scripts/check_extra_rows.py     smoke test of the draft v5 fork estimators and OOB fix 3 (run by setup)
+scripts/patches/poselib_extra_rows.py  fork: calibrated sequential pipeline, three-view LO from given cameras
+scripts/patches/threeview_extra.py     eval_f.py / eval.py: iteration grid, focal-prior / network rows, '+ SEQ'
 scripts/make_hruby_data.sh      Hruby Sec. 5.1 data split from ETH3D (anchors / val / train)
 scripts/run_baseline.sh         2-view baseline sweep on the RANSAC tutorial val split
 scripts/download_tier1.sh       dataset downloads (online machine)

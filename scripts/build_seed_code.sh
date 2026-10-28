@@ -42,6 +42,7 @@ grep -q -- "--exps" "$TP/threeview/eval_f.py" \
 "$PY" scripts/patches/threeview_enm.py "$TP/threeview"   # '+ ENM' -> two-view refit in eval_f.py
 "$PY" scripts/patches/threeview_seq.py "$TP/threeview"   # '+ SEQ' -> sequential baseline in eval_f.py
 "$PY" scripts/patches/threeview_seed.py "$TP/threeview"  # EVALF_SEED -> RANSAC seed in eval_f.py
+"$PY" scripts/patches/threeview_extra.py "$TP/threeview"  # draft v5: iteration grid, focal priors, calibrated SEQ
 rm -f "$TP"/threeview/*.rej "$TP"/threeview/*/*.rej "$TP"/threeview/*.orig "$TP"/threeview/*/*.orig
 unpack "wheelhouse/src/superansac-*.tar.gz" superansac
 # Eigen 3.4 is header-only but ships its CMake config only after configuring; do that once.
@@ -72,12 +73,14 @@ patch -d "$TP/PoseLib-threeview" -p1 --forward < scripts/patches/poselib-threevi
 "$PY" scripts/patches/poselib_oob_fixes.py "$TP/PoseLib-threeview"   # sample[4] read past the end in inner_refine
 "$PY" scripts/patches/poselib_shared_focal_refit.py "$TP/PoseLib-threeview"   # kill test A two-view refit
 "$PY" scripts/patches/poselib_sequential.py "$TP/PoseLib-threeview"   # Task 2.9 sequential baseline + binding
+"$PY" scripts/patches/poselib_extra_rows.py "$TP/PoseLib-threeview"   # draft v5: calibrated sequential, LO from cameras
 # setup.py only forwards Python_EXECUTABLE to CMake; the patched CMakeLists find torch and pybind11
 # through that interpreter. --no-cache: uv would otherwise reuse a wheel built from an older patch.
 ( cd "$TP/PoseLib-threeview" && \
   "$UV" pip install --python "$PY" --offline --no-index --no-build-isolation --no-cache --reinstall-package poselib . )
 "$PY" -c "import poselib; print('poselib (threeview fork) ok:', poselib.__file__, [n for n in dir(poselib) if 'three' in n.lower() or '3v' in n.lower()][:8])"
 "$PY" -c "import poselib; poselib.estimate_three_view_shared_focal_sequential"   # Task 2.9 binding is in
+"$PY" -c "import poselib; poselib.estimate_three_view_relative_pose_sequential; poselib.refine_three_view_shared_focal_from_init"
 # Stamp of the fork's source edits, written only after a successful build (scripts/run_abl_dell.sh compares it).
 cat scripts/patches/poselib-threeview.patch scripts/patches/poselib_*.py | sha256sum | cut -c1-16 \
   >"$TP/PoseLib-threeview/.build_stamp"

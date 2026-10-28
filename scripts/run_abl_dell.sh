@@ -16,7 +16,7 @@
 #   killA      Kill test A: the re-fitted mean-point rows ('+ ENM') per Cambridge scene, three runs (RANSAC seeds
 #              0-2: KA_RUNS), decide (best re-fitted variant trails 6p3v by >= 2.0 AUC@10), then stats
 #   stats      both kill tests with intervals (scripts/kill_test_stats.py -> results/abl_dell/kill_test_stats.md)
-#   followup   (not default) Dr. Aryal's 2026-10-27 requests: kill test B with all six methods and the retry, the
+#   followup   Dr. Aryal's 2026-10-27 requests (replaces killB and task28 in the default list): kill test B with all six methods and the retry, the
 #              Task 2.3 synthetic test, the full-solve check, baselines over three runs, the refit on ETH3D, Task 2.9
 #              stage times, Task 2.8 with the refit and sequential stages (new dated predictions), stats
 #   seq        Task 2.9 sequential baseline ('6p3v + SEQ') per finished scene, next to 6pt+P3P
@@ -26,6 +26,18 @@
 #              inliers kept, whole-track / view-3 / single-view / measured-mixture outliers added to w = 0.75, 0.5,
 #              0.35, 0.25 (scripts/semisynth_outliers.py -> $SSD/data/semisynth; needs task28's summary.json).
 #              Generation only: no method runs on these triplets here
+#   sets       draft v5 evaluation sets from the Task 2.8 labels (scripts/eval_sets.py -> results/sets): guarded SIFT
+#              (all w; w < 0.4 is the primary set), SP+LG (SPLG_N per scene), timing subsets (TIME_N triplets)
+#   geocalib   GeoCalib focal length of every view-1 image (scripts/geocalib_focals.py; needs ALLOW_DOWNLOADS=1)
+#   vggt       VGGT cameras of every SP+LG triplet (scripts/vggt_cameras.py, VGGT_SHARDS processes; ALLOW_DOWNLOADS=1)
+#   table1     Table 1 at default settings: every row of mr_config.DEFAULT, SP+LG, RANSAC seeds 0-2, all scenes
+#   curves     matched runtime, accuracy: every Table 1 method at the fixed iteration counts of mr_config (no early
+#              termination) on the guarded SIFT and SP+LG sets and the semi-synthetic triplets (MR_SS_N per file)
+#   calib      Table 3: PhotoTourism at default settings (released triplets, 5 px) and calibrated matched-runtime curves
+#   timing     matched runtime, time: every method on one pinned core (TIME_CORE), default settings and the timing
+#              grid, on the timing subsets; waits for every background job first so nothing else runs
+#   paper      scripts/matched_runtime.py (primary test, bins, crossovers, Fig. 2) and scripts/paper_tables.py
+#              (Tables 1 and 3 as LaTeX rows) -> results/matched, results/paper
 #   control    5pt+P3P+R+F control row (eval.py '5p3v + R + C') on the released triplets, own results file
 #   eth3d      ETH3D SP+LG triplets (12 scenes, 800 px): every image triplet within one intrinsics block that passes
 #              the overlap test, at most ETH_N = 2000 per scene (Tasks 1.4 / 1.6)
@@ -49,6 +61,10 @@
 #      ETH_N=2000 (max triplets per ETH3D scene)
 #      THETA=2.0 (inlier px at 800 px)  UNDISTORT=1 (undistort Cambridge keypoints with the NVM radial terms)
 #      EVALF_TIMEOUT=14400 (outer bound per eval_f.py run; hung, idle runs are killed after 2 min by a watchdog)
+#      ALLOW_DOWNLOADS=1 (geocalib / vggt: create .venv-nets with CPU torch, GeoCalib and VGGT and fetch their
+#      weights, a few GB; without it both steps are skipped and their rows stay empty)
+#      SPLG_N=1000 TIME_N=100 (evaluation sets)  MR_SS_N=200 TIME_SS_N=7 (semi-synthetic triplets per file and scene
+#      for curves / timing)  TIME_CORE=2  VGGT_SHARDS=12
 set -uo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$PWD
@@ -60,6 +76,9 @@ TRIP=$SSD/data/cambridge_triplets
 CAM=$SSD/data/cambridge
 ETRIP=$SSD/data/eth3d_triplets
 ETH=$SSD/data/eth3d
+SS=$SSD/data/semisynth
+SETS=$ROOT/results/sets
+NETPY=$ROOT/.venv-nets/bin/python
 FEAT=triplets-features_superpoint_800_2048-LG
 SIFT=triplets-SIFT_triplet_correspondences-rootsift8000
 SCENES=(KingsCollege OldHospital ShopFacade StMarysChurch GreatCourt)
@@ -98,7 +117,36 @@ fork_current() {   # the installed fork was built from the current patches (stam
   local want
   want=$(cat scripts/patches/poselib-threeview.patch scripts/patches/poselib_*.py | sha256sum | cut -c1-16)
   [[ $(cat "$ROOT/third_party/PoseLib-threeview/.build_stamp" 2>/dev/null) == "$want" ]] \
-    && "$PY" -c "import poselib; poselib.estimate_three_view_shared_focal_sequential" 2>/dev/null
+    && "$PY" -c "import poselib; poselib.estimate_three_view_shared_focal_sequential
+poselib.estimate_three_view_relative_pose_sequential; poselib.refine_three_view_shared_focal_from_init" 2>/dev/null
+}
+
+focals_for() {   # GeoCalib focal lengths of a scene (geocalib step), or nothing
+  local f
+  for f in "$TRIP/$1/geocalib_focals.h5" "$ETRIP/$1/geocalib_focals.h5"; do
+    [[ -f $f ]] && { echo "$f"; return; }
+  done
+}
+
+nets_ready() {   # GeoCalib and VGGT in their own venv, so their torch never replaces the one the fork links
+  [[ -x $NETPY ]] && "$NETPY" -c "import geocalib, vggt, h5py, PIL" 2>/dev/null && return 0
+  [[ ${ALLOW_DOWNLOADS:-} == 1 ]] || { log "nets: GeoCalib / VGGT not installed and ALLOW_DOWNLOADS is not 1; skipped"; return 1; }
+  log "nets: creating $ROOT/.venv-nets (CPU torch, GeoCalib, VGGT; log $OUT/nets_install.log)"
+  { python3 -m venv "$ROOT/.venv-nets" && "$NETPY" -m pip install --upgrade pip \
+    && "$NETPY" -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu \
+    && "$NETPY" -m pip install h5py pillow "git+https://github.com/cvg/GeoCalib#egg=geocalib" \
+         "git+https://github.com/facebookresearch/vggt"; } >"$OUT/nets_install.log" 2>&1 \
+    && "$NETPY" -c "import geocalib, vggt" 2>/dev/null && return 0
+  log "nets: install failed (see $OUT/nets_install.log); the GeoCalib and VGGT rows stay empty"
+  return 1
+}
+
+run_timing() {   # run_timing <eval_f.py|eval.py> <dir> <feature> <tag> [options]: one pinned core, no worker pool
+  local script=$1 dir=$2 f=$3 tag=$4; shift 4
+  ( cd "$TV" && exec env PYTHONPATH="$PWD" MPLBACKEND=Agg EVAL_SCRIPT="$script" EVALF_CRASH_DIR="$OUT/crashes/timing" \
+      timeout -k 60 "${EVALF_TIMEOUT:-14400}" taskset -c "${TIME_CORE:-2}" "${ONE_THREAD[@]}" \
+      "$PY" -W ignore "$ROOT/scripts/eval_f_safe.py" -nw 1 --tag "$tag" "$@" "$f" "$dir" ) </dev/null \
+    >>"$OUT/timing.log" 2>&1 || log "timing: $script $(basename "$dir") $tag failed (see $OUT/timing.log)"
 }
 
 json_ok() { "$PY" -c "import json, sys; json.load(open(sys.argv[1]))" "$1" 2>/dev/null; }
@@ -131,6 +179,7 @@ step_setup() {
   "$PY" scripts/patches/threeview_enm.py "$TV" >/dev/null || die "threeview_enm.py"   # '+ ENM' (kill test A)
   "$PY" scripts/patches/threeview_seq.py "$TV" >/dev/null || die "threeview_seq.py"   # '+ SEQ' (Task 2.9)
   "$PY" scripts/patches/threeview_seed.py "$TV" >/dev/null || die "threeview_seed.py"   # EVALF_SEED (kill test A)
+  "$PY" scripts/patches/threeview_extra.py "$TV" >/dev/null || die "threeview_extra.py"   # draft v5 options
   local ck=$HOME/.cache/torch/hub/checkpoints
   mkdir -p "$ck"
   for w in superpoint_v1.pth superpoint_lightglue_v0-1_arxiv.pth; do
@@ -149,6 +198,9 @@ step_setup() {
       || die "setup: fork rebuild failed (see $OUT/fork_build.log)"
     log "setup: fork rebuilt"
   fi
+  # draft v5 estimators and OOB fix 3 on a synthetic triplet (scripts/check_extra_rows.py)
+  "$PY" -W ignore scripts/check_extra_rows.py >"$OUT/extra_rows_check.txt" 2>&1 \
+    || die "setup: extra-row check failed (see $OUT/extra_rows_check.txt)"
   log "setup ok"
 }
 
@@ -218,7 +270,9 @@ run_evalf() {   # run_evalf <triplet dir> <feature> <tag or ""> [eval_f.py optio
   local dir=$1 f=$2 tag=$3 s try pid cpu last idle size k; shift 3
   s=$(basename "$dir")
   local short=splg; [[ $f == *SIFT* ]] && short=sift   # SP+LG and SIFT logs must not share a name
-  local json=$TV/results/focal_$s${tag:+-$tag}-$f.json logf=$OUT/evalf_${s}${tag:+_$tag}_$short.log
+  [[ $f == triplets-semisynth_* ]] && { short=${f#triplets-semisynth_}; short=${short%%-*}; }
+  # RUN_JSON: the results file when eval_f.py names it differently (-g adds '-graph', eval.py has its own names)
+  local json=${RUN_JSON:-$TV/results/focal_$s${tag:+-$tag}-$f.json} logf=$OUT/evalf_${s}${tag:+_$tag}_$short.log
   for try in 1 2 3 4; do
     if [[ -f $json ]]; then
       json_ok "$json" && return 0
@@ -411,12 +465,12 @@ step_fresh() {
            "$TV"/results/*-control-*.json; do
     [[ -e $f ]] && mv "$f" "$ta/" && n=$((n + 1))
   done
-  for f in "$ROOT/results/killB" "$ROOT/results/task28" "$ROOT/results/crashes_eval"; do
+  for f in "$ROOT/results/killB" "$ROOT/results/task28" "$ROOT/results/crashes_eval" "$ROOT/results/sets" \n           "$ROOT/results/matched" "$ROOT/results/paper"; do
     [[ -e $f ]] && mv "$f" "$a/" && n=$((n + 1))
   done
   for f in "$OUT"/killA.txt "$OUT"/kill_test_stats.* "$OUT"/killB* "$OUT"/seq.txt "$OUT"/task28* "$OUT"/control.* "$OUT"/crashes \
            "$OUT"/monodromy_rng* "$OUT"/compare_focal.txt "$OUT"/crash_report.txt "$OUT"/evalf_*.log \
-           "$OUT"/fork_build.log "$OUT"/thresh1.log "$OUT"/runtime.log; do
+           "$OUT"/fork_build.log "$OUT"/thresh1.log "$OUT"/runtime.log "$OUT"/t3.* "$OUT"/timing.log \n           "$OUT"/semisynth* "$OUT"/sets.log "$OUT"/matched.log "$OUT"/paper_tables.log; do
     [[ -e $f ]] && mv "$f" "$a/abl_dell/" && n=$((n + 1))
   done
   [[ -d $SSD/abl_dell_results ]] && mv "$SSD/abl_dell_results" "$SSD/abl_dell_results_$ts"
@@ -489,6 +543,173 @@ step_semisynth() {
   log "semisynth: triplets in $dst (manifest copied to $OUT)"
 }
 
+step_sets() {
+  # draft v5 evaluation sets from the Task 2.8 labels (guarded SIFT, SP+LG, timing subsets; courtyard left out)
+  local csv=$ROOT/results/task28/triplets.csv
+  [[ -f $csv ]] || { log "sets: $csv missing (task28 / followup step); skipped"; return; }
+  "$PY" scripts/eval_sets.py --labels "$csv" --cambridge "$TRIP" --eth3d "$ETRIP" --theta "${THETA:-2.0}" \
+    --splg-n "${SPLG_N:-1000}" --time-n "${TIME_N:-100}" --out "$SETS" >"$OUT/sets.log" 2>&1 \
+    || { log "sets: failed (see $OUT/sets.log)"; return; }
+  sed "s/^/sets: /" "$OUT/sets.log"
+}
+
+step_geocalib() {
+  # GeoCalib focal length of every view-1 image (focal-prior row of Table 1), in each triplet folder on the SSD
+  nets_ready || return
+  local dir img
+  while read -r dir img; do
+    [[ $(basename "$dir") == courtyard ]] && continue
+    "$NETPY" -W ignore scripts/geocalib_focals.py "$dir" "$img" --threads 16 --lists "$FEAT.txt" "$SIFT.txt" \
+      >>"$OUT/geocalib.log" 2>&1 </dev/null || log "geocalib: $(basename "$dir") failed (see $OUT/geocalib.log)"
+  done < <(finished_dirs)
+  log "geocalib: done ($OUT/geocalib.log)"
+}
+
+step_vggt() {
+  # VGGT cameras of every SP+LG triplet (network row of Table 1), sharded, merged per scene into results/vggt
+  nets_ready || return
+  local n=${VGGT_SHARDS:-12} th dir img s k pids
+  th=$(( NW / n > 0 ? NW / n : 1 ))
+  mkdir -p "$ROOT/results/vggt"
+  while read -r dir img; do
+    s=$(basename "$dir"); [[ $s == courtyard ]] && continue
+    pids=()
+    for ((k = 0; k < n; k++)); do
+      OMP_NUM_THREADS=$th "$NETPY" -W ignore scripts/vggt_cameras.py "$dir" "$img" --list "$FEAT.txt" \
+        --out "$ROOT/results/vggt/$s.h5" --shard "$k" --nshards "$n" --threads "$th" \
+        >"$OUT/vggt_${s}_$k.log" 2>&1 </dev/null &
+      pids+=($!)
+    done
+    wait "${pids[@]}"   # only these: monodromy may run in the background
+    "$NETPY" scripts/vggt_cameras.py "$dir" "$img" --out "$ROOT/results/vggt/$s.h5" --merge >>"$OUT/vggt.log" 2>&1
+    log "vggt: $s $(tail -1 "$OUT/vggt.log")"
+  done < <(finished_dirs)
+}
+
+step_table1() {
+  # Table 1 at default settings: every row of mr_config.DEFAULT on SP+LG, RANSAC seeds 0-2, every scene but courtyard
+  local exps dir img s sd
+  exps=$("$PY" scripts/mr_config.py exps default)
+  while read -r dir img; do
+    s=$(basename "$dir"); [[ $s == courtyard ]] && continue
+    for sd in 0 1 2; do
+      EVALF_SEED=$sd EVALF_FOCALS=$(focals_for "$s") EVALF_INIT=$ROOT/results/vggt/$s.h5 \
+        run_evalf "$dir" "$FEAT" "t1-s$sd" --exps "$exps" </dev/null || true
+    done
+  done < <(finished_dirs)
+}
+
+step_curves() {
+  # matched runtime, accuracy: every Table 1 method at the fixed iteration counts (eval_f.py -g, no early
+  # termination) on the guarded SIFT and SP+LG sets (one run per method) and the semi-synthetic triplets
+  [[ -f $SETS/manifest.json ]] || { log "curves: no evaluation sets (sets step); skipped"; return; }
+  local grid exps set f d s key label
+  grid=$("$PY" scripts/mr_config.py grid curves)
+  exps=$("$PY" scripts/mr_config.py exps focal)
+  for set in sift splg; do
+    f=$FEAT; [[ $set == sift ]] && f=$SIFT
+    for d in "$SETS/$set"/*/; do
+      d=${d%/}; s=$(basename "$d")
+      while IFS=$'\t' read -r key label; do
+        EVALF_ITERS=$grid EVALF_FOCALS=$(focals_for "$s") RUN_JSON=$TV/results/focal_$s-graph-mr-$set-$key-$f.json \
+          run_evalf "$d" "$f" "mr-$set-$key" -g --exps "$label" </dev/null || true
+      done < <("$PY" scripts/mr_config.py labels focal)
+    done
+  done
+  for d in "$SS"/*/; do
+    d=${d%/}; s=$(basename "$d")
+    for f in "$d"/triplets-semisynth_*-LG.txt; do
+      [[ -f $f ]] || continue
+      f=$(basename "$f" .txt)
+      EVALF_ITERS=$grid EVALF_FOCALS=$(focals_for "$s") RUN_JSON=$TV/results/focal_$s-graph-mr-ss-$f.json \
+        run_evalf "$d" "$f" "mr-ss" -g --first "${MR_SS_N:-200}" --exps "$exps" </dev/null || true
+    done
+  done
+}
+
+step_calib() {
+  # Table 3: PhotoTourism (and Aachen) at default settings on the released triplets (eval.py at 5 px, every calibrated
+  # row), then the calibrated matched-runtime curves on the guarded SIFT triplets with w < 0.4 (reference
+  # intrinsics) and on the semi-synthetic whole-track triplets at w = 0.25
+  local cexps grid d s f key label
+  cexps=$("$PY" scripts/mr_config.py exps calib)
+  grid=$("$PY" scripts/mr_config.py grid curves)
+  if [[ ! -f $OUT/t3.done ]]; then
+    "${ONE_THREAD[@]}" bash scripts/run_tzamos_table.sh --exps "$cexps" --tag t3 >"$OUT/t3.log" 2>&1 \
+      && touch "$OUT/t3.done"
+    log "calib: released triplets done (see $OUT/t3.log)"
+  fi
+  [[ -f $SETS/manifest.json ]] || { log "calib: no evaluation sets (sets step); curves skipped"; return; }
+  for d in "$SETS/sift_low"/*/; do
+    d=${d%/}; s=$(basename "$d")
+    while IFS=$'\t' read -r key label; do
+      EVAL_SCRIPT=eval.py EVALF_ITERS=$grid RUN_JSON=$TV/results/$s-graph-5.0t-mrc-sift_low-$key-$SIFT.json \
+        run_evalf "$d" "$SIFT" "mrc-sift_low-$key" -t 5.0 -g --exps "$label" </dev/null || true
+    done < <("$PY" scripts/mr_config.py labels calib)
+  done
+  f=triplets-semisynth_whole_w25-$FEAT
+  for d in "$SS"/*/; do
+    d=${d%/}; s=$(basename "$d")
+    [[ -f $d/$f.txt ]] || continue
+    EVAL_SCRIPT=eval.py EVALF_ITERS=$grid RUN_JSON=$TV/results/$s-graph-5.0t-mrc-ss-$f.json \
+      run_evalf "$d" "$f" "mrc-ss" -t 5.0 -g --first "${MR_SS_N:-200}" --exps "$cexps" </dev/null || true
+  done
+}
+
+step_timing() {
+  # matched runtime, time: every method on one pinned core at default settings and at the timing grid, on the
+  # timing subsets (sift_time, splg_time, TIME_SS_N semi-synthetic triplets per file and scene). Waits for every
+  # background job of this runner (monodromy, full-solve check) first, so nothing else runs meanwhile.
+  log "timing: waiting for background jobs"; wait
+  [[ -f $SETS/manifest.json ]] || { log "timing: no evaluation sets (sets step); skipped"; return; }
+  local grid exps dexps cexps set f d s
+  grid=$("$PY" scripts/mr_config.py grid timing)
+  exps=$("$PY" scripts/mr_config.py exps focal)
+  dexps=$("$PY" scripts/mr_config.py exps default)
+  cexps=$("$PY" scripts/mr_config.py exps calib)
+  : >"$OUT/timing.log"
+  for set in sift_time splg_time; do
+    f=$FEAT; [[ $set == sift_time ]] && f=$SIFT
+    for d in "$SETS/$set"/*/; do
+      d=${d%/}; s=$(basename "$d")
+      EVALF_FOCALS=$(focals_for "$s") EVALF_INIT=$ROOT/results/vggt/$s.h5 \
+        run_timing eval_f.py "$d" "$f" "tm-$set" --exps "$dexps"
+      EVALF_ITERS=$grid EVALF_FOCALS=$(focals_for "$s") run_timing eval_f.py "$d" "$f" "tm-$set" -g --exps "$exps"
+      if [[ $set == sift_time ]]; then
+        run_timing eval.py "$d" "$f" "tmc-$set" -t 5.0 --exps "$cexps"
+        EVALF_ITERS=$grid run_timing eval.py "$d" "$f" "tmc-$set" -t 5.0 -g --exps "$cexps"
+      fi
+    done
+  done
+  for d in "$SS"/*/; do
+    d=${d%/}; s=$(basename "$d")
+    for f in "$d"/triplets-semisynth_*-LG.txt; do
+      [[ -f $f ]] || continue
+      f=$(basename "$f" .txt)
+      EVALF_FOCALS=$(focals_for "$s") run_timing eval_f.py "$d" "$f" tm-ss --first "${TIME_SS_N:-7}" --exps "$exps"
+      EVALF_ITERS=$grid EVALF_FOCALS=$(focals_for "$s") \
+        run_timing eval_f.py "$d" "$f" tm-ss -g --first "${TIME_SS_N:-7}" --exps "$exps"
+      if [[ $f == triplets-semisynth_whole_w25-* ]]; then
+        run_timing eval.py "$d" "$f" tmc-ss -t 5.0 --first "${TIME_SS_N:-7}" --exps "$cexps"
+        EVALF_ITERS=$grid run_timing eval.py "$d" "$f" tmc-ss -t 5.0 -g --first "${TIME_SS_N:-7}" --exps "$cexps"
+      fi
+    done
+  done
+  log "timing: done (pinned to core ${TIME_CORE:-2}; $OUT/timing.log)"
+}
+
+step_paper() {
+  # matched-runtime analysis (primary test, bins, crossovers, Fig. 2) and Tables 1 and 3 as LaTeX rows
+  "$PY" -W ignore scripts/matched_runtime.py --results "$TV/results" --sets "$SETS" --semisynth "$SS/manifest.json" \
+    --predictions "$ROOT/results/task28/predictions_free.json" --out "$ROOT/results/matched" \
+    >"$OUT/matched.log" 2>&1 || log "paper: matched_runtime.py failed (see $OUT/matched.log)"
+  "$PY" -W ignore scripts/paper_tables.py --results "$TV/results" --sets "$SETS" \
+    --matched "$ROOT/results/matched/summary.json" --vggt "$ROOT/results/vggt" --out "$ROOT/results/paper" \
+    >"$OUT/paper_tables.log" 2>&1 || log "paper: paper_tables.py failed (see $OUT/paper_tables.log)"
+  grep -a "intersection-union" "$ROOT/results/matched/matched.md" 2>/dev/null | sed "s/^/paper: /"
+  log "paper: results/matched/{matched.md,fig2.png,summary.json}, results/paper/{tables.md,table1_rows.tex,table3_rows.tex}"
+}
+
 step_control() {
   [[ -f $OUT/control.done ]] && { log "control row already done"; return; }
   "${ONE_THREAD[@]}" bash scripts/run_tzamos_table.sh --exps "5p3v + R + C" --tag control >"$OUT/control.log" 2>&1 \
@@ -516,7 +737,9 @@ step_collect() {
   local dst=$SSD/abl_dell_results
   mkdir -p "$dst"
   cp -r "$OUT" "$dst/" 2>/dev/null
-  cp -r "$ROOT/results/killB" "$ROOT/results/task28" "$dst/" 2>/dev/null
+  cp -r "$ROOT/results/killB" "$ROOT/results/task28" "$ROOT/results/matched" "$ROOT/results/paper" "$dst/" 2>/dev/null
+  mkdir -p "$dst/sets" && cp "$SETS"/manifest.json "$SETS"/labels.csv "$dst/sets/" 2>/dev/null
+  cp "$ROOT"/results/vggt/*.times.txt "$dst/" 2>/dev/null
   cp "$TV"/results/focal_*.json "$TV"/results/kill_test_a-*.json "$TV"/results/*-control-*.json "$ROOT"/results/runtime_1core_*.txt "$dst/" 2>/dev/null
   # Flush to the SSD before saying it is done: on 2026-10-23 the SSD was unplugged right after a copy and all
   # 669 copied files arrived empty (data still in the write cache). Then check that nothing came out empty.
@@ -558,6 +781,9 @@ step_status() {
   [[ -f $OUT/task28_success.log ]] && grep -a "^ceiling" "$OUT/task28_success.log" | sed "s/^/Task 2.8: /"
   [[ -f $OUT/semisynth.log ]] && grep -a -E "triplets, median|only .* qualify|Error" "$OUT/semisynth.log" | sed "s/^/semisynth: /"
   ls "$ROOT"/results/task28/predictions_*.md 2>/dev/null | sed "s/^/Task 2.8 predictions: /"
+  [[ -f $SETS/manifest.json ]] && echo "sets: $("$PY" -c "import json,sys; m=json.load(open(sys.argv[1]))['sets']; print(', '.join(k + ' ' + str(v['triplets']) for k, v in m.items()))" "$SETS/manifest.json")"
+  echo "curves files: $(ls "$TV"/results/focal_*-graph-mr-* "$TV"/results/*-graph-5.0t-mrc-* 2>/dev/null | wc -l)," \n       "timing files: $(ls "$TV"/results/*-tm-* "$TV"/results/*-tmc-* 2>/dev/null | wc -l)," \n       "table1 files: $(ls "$TV"/results/focal_*-t1-s* 2>/dev/null | wc -l)"
+  [[ -f $ROOT/results/matched/matched.md ]] && grep -a "intersection-union" "$ROOT/results/matched/matched.md" | sed "s/^/paper: /"
   local fl
   for fl in "$OUT"/fullsolve_*.log; do
     [[ -f $fl ]] && echo "$(basename "$fl"): $(tail -c 300 "$fl" | tr '\r' '\n' | grep -a -v '^\s*$' | tail -1 | cut -c1-150)"
@@ -571,7 +797,10 @@ step_status() {
 }
 
 # Every dataset first (Cambridge and ETH3D triplets, SIFT tracks), then the evaluations on complete data.
-DEFAULT=(setup machine monodromy triplets eth3d sift evalf killB killA seq control task28 semisynth compare crashdebug collect)
+# followup holds kill test B (seven methods), Task 2.8 with the refit (dated predictions) and the statistics, so every
+# low-inlier run (curves, calib, timing) comes after the predictions are written.
+DEFAULT=(setup machine monodromy triplets eth3d sift evalf killA seq control followup semisynth sets geocalib vggt table1
+         curves calib timing paper compare crashdebug collect)
 
 main() {
   # Bash variables are visible to called functions: these names must not be used by any step (2026-10-26 the

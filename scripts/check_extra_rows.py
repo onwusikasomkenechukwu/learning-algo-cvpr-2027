@@ -3,7 +3,10 @@ synthetic triplet with half outliers. Run by run_abl_dell.sh setup after a fork 
 
   joint calibrated 5pt+P3P with LO and final refinement   (refine_3v_relpose: OOB fix 3; Eigen asserted on it)
   calibrated sequential pipeline                            poses within 1 deg, fixed counts run in both stages
-  shared-focal LO from given cameras                        from 10 % off: f within 5 %, poses within 2 deg
+  shared-focal LO from given cameras                        from the joint estimator's result: returns it (focal
+                                                            within 0.5 %, rotations within 0.1 deg); from 5pt+P3P at
+                                                            a focal length 10 % off: keeps the inliers, focal error
+                                                            below the starting 10 %
 
   python scripts/check_extra_rows.py
 """
@@ -65,14 +68,29 @@ def main():
         *x, cam, cam, cam, dict(ro, min_iterations=40, max_iterations=40), bo)
     check("sequential fixed count", info['iterations'] == 80, f"40 per stage -> {info['iterations']} iterations")
 
-    dR = rot([0.01, -0.02, 0.015])
-    s = np.linalg.norm(t2)
+    # LO from given cameras, 1: from the joint shared-focal estimator's own result it must return that result
+    # (same inliers, same refinement), which checks its pose, scale and threshold conventions
+    ro6 = dict(ro, sample_sz=6)
+    j, jinfo = poselib.estimate_three_view_shared_focal_relative_pose(*x, pp, ro6, bo)
+    trip, info = poselib.refine_three_view_shared_focal_from_init(
+        *x, pp, j.camera.focal(), j.poses.pose12.R, j.poses.pose12.t, j.poses.pose13.R, j.poses.pose13.t, ro, bo, 2)
+    df = abs(trip.camera.focal() - j.camera.focal()) / j.camera.focal()
+    dr = max(ang(trip.poses.pose12.R.T @ j.poses.pose12.R), ang(trip.poses.pose13.R.T @ j.poses.pose13.R))
+    check("LO from the joint result", df < 0.005 and dr < 0.1 and info['num_inliers'] >= 140,
+          f"focal change {100 * df:.3f} %, rotation change {dr:.4f} deg, {info['num_inliers']} inliers "
+          f"(joint: focal error {100 * abs(j.camera.focal() - f) / f:.2f} %, {jinfo['num_inliers']} inliers)")
+
+    # LO from given cameras, 2: as the focal-prior rows use it, from 5pt+P3P at a focal length 10 % off; it must
+    # keep the inliers and move the focal length towards the truth
     for f0 in (0.9 * f, 1.1 * f):
+        c0 = dict(cam, params=[f0, pp[0], pp[1]])
+        p0, _ = poselib.estimate_three_view_relative_pose(*x, c0, c0, c0, dict(ro, inner_refine=2, threeview_check=True), bo)
         trip, info = poselib.refine_three_view_shared_focal_from_init(
-            *x, pp, f0, dR @ R2, t2 / s, dR @ R3, t3 / s, ro, bo, 2)
+            *x, pp, f0, p0.pose12.R, p0.pose12.t, p0.pose13.R, p0.pose13.t, ro, bo, 2)
         e = max(ang(trip.poses.pose12.R.T @ R2), ang(trip.poses.pose13.R.T @ R3))
         ferr = abs(trip.camera.focal() - f) / f
-        check(f"LO from cameras (f0 {f0:.0f})", ferr < 0.05 and e < 2.0 and np.isfinite(trip.camera.focal()),
+        check(f"LO from 5pt+P3P at f0 {f0:.0f}", np.isfinite(trip.camera.focal()) and ferr < 0.1
+              and info['num_inliers'] >= 140,
               f"focal error {100 * ferr:.2f} % (start 10 %), max rotation error {e:.3f} deg, {info['num_inliers']} inliers")
     if fails:
         sys.exit(f"{len(fails)} check(s) failed: {', '.join(fails)}")

@@ -2,111 +2,117 @@
 
 Code, data pipeline and results for a CVPR 2027 submission with Dr. Saurav K. Aryal (Howard University) on
 three-view relative pose from four points inside RANSAC: calibrated cameras (4p3v) and one camera with an
-unknown shared focal length (4p3vf).
+unknown shared focal length (4p3vf). **Summary of the project so far: [`docs/CVPR_SUMMARY.md`](docs/CVPR_SUMMARY.md).**
 
-## Status (2026-10-28)
-**Direction (draft v5, 2026-10-27).** Four tracks in three views are enough for the poses, and with one camera
-also for the focal length, but these minimal problems have hundreds to thousands of complex solutions. Exact
-solvers therefore track many homotopy paths, and practice samples five or six points or uses approximate
-four-point solvers. The paper asks whether exactness pays inside RANSAC. Our two pre-registered tests of an exact
-single-path solver both came out against it, and the paper reports them as results. It then studies what does
-decide between four points and six: the sample size and which views the outliers corrupt. It compares four points
-with a two-view refit against the joint and the sequential six-point pipelines at matched runtime, on real
-low-inlier SIFT triplets and semi-synthetic outliers of three types, for the shared-focal and the calibrated
-problem.
+## Status (2026-11-02)
+**Direction (draft v5).** Four tracks in three views determine the poses, and with one camera also the focal length,
+but these minimal problems have hundreds to thousands of complex solutions. Exact solvers therefore track many
+homotopy paths, and practice samples five or six points or uses approximate four-point solvers. The paper asks
+whether exactness pays inside RANSAC, and what does decide between four points and six: the sample size and which
+views the outliers corrupt.
 
-**Where it stands.** Everything the draft needs is built ([experiments below](#what-the-comprehensive-run-produces))
-and waits for one comprehensive run on abl-dell. A third bug found in the seed code
-([below](#known-issues-in-the-seed-code-fixed-here)) changes every number that comes from the PoseLib fork, so
-the run starts from scratch (`fresh`) and the fork-based numbers on this page are superseded when it finishes.
-Kill test B uses our Python prototype and is not affected.
+**Results so far.**
+- Exactness does not pay: both pre-registered tests came out against it.
+- The comprehensive run (Oct 28–30, every experiment of the draft, fork bugs fixed) rejects the primary hypothesis.
+  On 13,744 real low-inlier triplets, four points with a two-view refit lose to both six-point pipelines at matched
+  runtime.
+- Four points beat six only for whole-track outliers on semi-synthetic data, below w ≈ 0.40.
+- On real poor matches, the sequential six-point pipeline and a focal-length prior help most.
 
-## The two tests of exactness (results)
-Fixed before the runs: exactness has room only if a cheap two-view refit of the approximate seeds still trails
-6pt+P3P by at least 2.0 AUC@10 (test A), and it helps only if continuation from the same seeds reaches the correct
-root at least 5 points more often than converged Levenberg-Marquardt (test B). Data: 5 Cambridge scenes × 5,000
-SuperPoint+LightGlue triplets (complete rerun of 2026-10-26, no PoseLib crashes). Statistics:
+A large run of supplement and robustness checks has been going on abl-dell since Nov 2
+([below](#running-on-abl-dell-no-gpu)).
+
+## The two tests of exactness
+Thresholds fixed before the runs. Data: 5 Cambridge scenes × 5,000 SuperPoint+LightGlue triplets. Statistics:
 [`scripts/kill_test_stats.py`](scripts/kill_test_stats.py).
 
 | Test | Rule | Result |
 |---|---|---|
-| **A**: how much does a two-view refit close? | gap ≥ 2.0 AUC@10 | **Against exactness**: the best refitted variant, 4p3vf(M±δ), trails 6pt+P3P by **1.61**, 95% CI [1.44, 1.78] with the scenes fixed, [0.99, 2.18] with scenes resampled (best variant re-selected per replicate); mean of 3 RANSAC runs. The plain mean point with the refit trails by 1.97. *Fork-based: rerun pending.* |
-| **B**: does the exact path find the right root? | ≥ +5 points, McNemar clear | **Against exactness**: 15.6% vs 21.6% for converged LM, **−6.0 points**, 95% CI [−6.9, −5.1], McNemar p = 2.4e-40; 23,184 samples, 5,779 with an unambiguous real correct root; LM ahead in all 5 scenes |
+| **A**: how much does a two-view refit close? | gap to 6pt+P3P ≥ 2.0 AUC@10 | **Against exactness**: the best refitted variant, 4p3vf(M±δ)+R, trails 6pt+P3P by **1.14**, 95% CI [0.98, 1.30] with the scenes fixed, [0.72, 1.54] with scenes resampled; no bootstrap replicate reaches 2.0; three RANSAC runs |
+| **B**: does the exact path find the right root? | ≥ +5 points over converged LM, from identical seeds | **Against exactness**: 15.6% vs 21.6%, **−6.0 points**, 95% CI [−6.9, −5.1], McNemar p = 2.4e-40; 23,184 samples, 5,779 with a usable correct root; LM ahead in all 5 scenes |
 
-- **Test A per scene** (gap to 6pt+P3P): Great Court 2.43, King's College 0.54, Old Hospital 1.59, Shop Facade
-  1.47, St Mary's 2.03. The refit adds 5.2 to 6.3 AUC@10 to every mean-point variant (the plain mean point trails by 7.70 without it).
-- **Test B against the other equation solvers** (strict success, continuation minus each, 2026-10-27 run):
-  Newton homotopy +7.6, Newton's method +10.5 and the released two-step refinement +15.6, but the L-shaped retry
-  −1.1, the start off the solution surface −0.8 and converged LM −6.0. The tracker works; refining the seed
-  against the images does better.
-- **The correct-root tool checks out against a full solve:** its root is one of the full solve's endpoints in
-  63 of 63 synthetic and 44 of 46 King's College samples (2,672 start solutions; about 400 real endpoints and 3
-  to 4 accepted ones per sample).
-- **Why exactness does not help here:** at real noise the four-point problem is badly conditioned. The exact
-  continuation of the ground truth meets a 2°/10%-focal criterion on only about 5% of real samples, and paths
-  fold or end at a wrong exact root of the right orientation class.
+- Test A per scene: Great Court 1.64, King's College 0.43, Old Hospital 1.14, Shop Facade 1.22, St Mary's 1.25. The
+  refit adds 4.0 to 5.1 AUC@10 to every mean-point variant.
+- Test B, strict success from the same seeds: Newton homotopy 8.0%, Newton's method 5.2%, L-shaped retry 16.7%, start
+  off the solution surface 16.4%.
+- The correct-root reference is a genuine solution: it is one of the full solve's endpoints in 63/63 synthetic and
+  44/46 real samples.
+- At real noise the problem is badly conditioned: the correct root itself meets a 2°/10%-focal criterion on only 3.3%
+  of usable samples.
+
+## Main results (comprehensive run, 2026-10-28 to 10-30)
+**Primary test (pre-registered, fails).** 4p3vf(M) with the refit against both six-point pipelines at matched runtime,
+on the 13,744 guarded SIFT triplets with inlier ratio w < 0.4 (16 scenes): **−8.8** AUC@10 against 6pt+P3P
+(95% CI [−14.8, −2.8]) and **−14.7** against the sequential pipeline ([−20.9, −8.8]); intersection-union p = 1.
+
+| Method | Matched runtime, SIFT w < 0.4 | Cambridge, default settings | ETH3D, default settings |
+|---|---|---|---|
+| 6pt+P3P | 34.19 | 54.81 | 71.79 |
+| Sequential, six points then P3P | 40.10 | 46.80 | 48.37 |
+| 5pt+P3P+R+F at a GeoCalib focal length | 45.94* | **56.93** | 69.53 |
+| 4p3vf(M) | 25.04 | 48.02 | 53.02 |
+| 4p3vf(M) with two-view refit | 25.38 | 52.84 | 58.19 |
+| VGGT, then three-view LO | n/a | **60.10** | 72.69 |
+| Oracle (ground-truth virtual points) | 51.46 | 55.34 | 74.54 |
+
+AUC@10. Default settings: three RANSAC runs. Matched runtime: read at the mean single-core time of 6pt+P3P.
+\*GeoCalib's time included a one-off file load; it is being re-timed.
+
+**Outlier types against the predictions** (dated Oct 28, before any low-inlier run; crossover = inlier ratio below
+which four points with the refit win):
+
+| Outlier type | vs 6pt+P3P: predicted → measured | vs sequential: predicted → measured |
+|---|---|---|
+| whole-track | 0.57 → 0.40 [0.33, 0.49] | 0.17 → 0.72 [0.67, 0.75] |
+| view-3 | none → none | none → none |
+| single-view | 0.36 → none | none → none |
+| measured mixture | 0.40 → none | none → none |
+
+The model's qualitative picture holds (whole-track yes, view-3 no, sequential strong for single-view outliers), but
+it overestimates the advantage of four points.
+
+**Calibrated cameras:**
+- PhotoTourism at default settings: all methods land between 75.4 and 77.4 AUC@10.
+- Low-inlier SIFT at matched runtime: the sequential pipeline leads clearly, 64.5 against 43.7 for 5pt+P3P.
 
 ## When do four points beat six?
-Let a be the fraction of tracks correct in views 1 and 2 and b the fraction of those also correct in view 3
-(inlier ratio w = ab). A joint pipeline that solves views 1–2 from m points and view 3 by P3P draws a clean
-sample with probability about a^m b^3. An approximate four-point solver needs a^4 b^3 (an exact one a^4 b^4); a
-sequential pipeline needs about 1/a^m + 1/b^3 samples. Hence:
+Let a be the fraction of tracks correct in views 1–2 and b the fraction of those also correct in view 3 (w = ab). A
+joint pipeline that solves views 1–2 from m points and view 3 by P3P needs about 1/(a^m b³) samples, an approximate
+four-point solver 1/(a⁴ b³) (an exact one 1/(a⁴ b⁴)), and a sequential pipeline 1/a^m + 1/b³. Hence:
 - **whole-track outliers** (b = 1): four points need 1/w² times fewer samples than six and 1/w fewer than five;
 - **view-3 outliers** (a = 1): no advantage;
 - **single-view outliers**: the sequential pipeline can win (for m = 6 whenever b < about 0.73).
 
-With per-sample success rates s and costs c measured on the tuning scene (ETH3D courtyard), the model predicts
-crossover inlier ratios, written dated before any low-inlier run
-([`scripts/success_rates.py`](scripts/success_rates.py), [`scripts/crossovers.py`](scripts/crossovers.py)).
-On 2026-10-27 it predicted that four points with the refit beat 6pt+P3P below w = 0.575 for whole-track,
-0.363 for single-view and 0.404 for the measured mixture of outliers, never for view-3 outliers, and beat the
-sequential pipeline only for whole-track outliers below w = 0.174. *Fork-based: the comprehensive run rewrites
-these predictions with the fixed fork before any low-inlier run.*
+Success rates and costs measured on the tuning scene turn this into the dated crossover predictions
+([`scripts/success_rates.py`](scripts/success_rates.py), [`scripts/crossovers.py`](scripts/crossovers.py)). The
+outlier labels come from [`scripts/outlier_stats.py`](scripts/outlier_stats.py). The tuning scene's SIFT outliers are
+43% whole-track, 29% view-3, 23% single-view and 5% other.
 
-Measured on real triplets ([`scripts/outlier_stats.py`](scripts/outlier_stats.py), labels against the reference
-cameras at 2 px on the 800 px scale):
-- **Low-inlier set:** 13,744 guarded SIFT triplets with w < 0.4 (49% of 28,042; guard: at least 12 inlier tracks
-  and an SP+LG inlier ratio above 0.5 under the same cameras).
-- **Outlier mixture** on the tuning scene's SIFT triplets: whole-track 43%, view-3 29%, view-1 18%, view-2 5%,
-  other 5%.
-
-## What the comprehensive run produces
+## What the runs produce
 | Draft item | What runs | Code |
 |---|---|---|
-| Table 1, default settings | every shared-focal row on Cambridge and ETH3D SP+LG, RANSAC seeds 0–2: 6pt+P3P, the sequential pipeline, 5pt+P3P+R+F at a guessed and at a GeoCalib focal length, the 4p3vf(M) family with and without the refit, the oracle, VGGT then three-view LO | [`mr_config.py`](scripts/mr_config.py), [`geocalib_focals.py`](scripts/geocalib_focals.py), [`vggt_cameras.py`](scripts/vggt_cameras.py) |
-| Matched runtime | accuracy at fixed iteration counts (10 to 30,000, no early termination) and single-core time on one pinned core; every method read at the mean time of 6pt+P3P at default settings, interpolated in log time | [`matched_runtime.py`](scripts/matched_runtime.py) |
-| Primary test | 4p3vf(M) with the refit against both six-point pipelines on the 13,744 low-inlier triplets: intersection-union test, two-level bootstrap over scenes and triplets, α = 0.05 | [`matched_runtime.py`](scripts/matched_runtime.py) |
-| Fig. 2 | AUC@10 against inlier ratio on real triplets (binned) and semi-synthetic whole-track, view-3, single-view and mixed outliers at w = 0.75–0.25, with measured and predicted crossovers; accuracy against runtime | [`semisynth_outliers.py`](scripts/semisynth_outliers.py), [`eval_sets.py`](scripts/eval_sets.py), [`matched_runtime.py`](scripts/matched_runtime.py) |
-| Table 2 | tests A and B (above), recomputed where fork-based | [`kill_test_stats.py`](scripts/kill_test_stats.py) |
-| Table 3 | calibrated: PhotoTourism at default settings, and matched runtime on the low-inlier set and semi-synthetic whole-track outliers; 5pt+P3P, the calibrated sequential pipeline, the refitted four-point variants, the learned HC solver | [`paper_tables.py`](scripts/paper_tables.py) |
+| Table 1 | every shared-focal row on Cambridge and ETH3D SP+LG, RANSAC seeds 0–2 | [`mr_config.py`](scripts/mr_config.py), [`paper_tables.py`](scripts/paper_tables.py) |
+| Matched runtime and the primary test | accuracy at fixed iteration counts (10 to 30,000) plus single-core time on one pinned core; per-triplet values read at the 6pt+P3P budget in log time; intersection-union test with a two-level bootstrap | [`matched_runtime.py`](scripts/matched_runtime.py) |
+| Fig. 2 | real triplets binned by inlier ratio; semi-synthetic whole-track, view-3, single-view and mixed outliers at w = 0.75–0.25 | [`semisynth_outliers.py`](scripts/semisynth_outliers.py), [`eval_sets.py`](scripts/eval_sets.py) |
+| Table 2 | tests A and B | [`kill_test_stats.py`](scripts/kill_test_stats.py) |
+| Table 3 | calibrated rows on PhotoTourism and at matched runtime | [`paper_tables.py`](scripts/paper_tables.py) |
+| Supplement (large run) | per-scene tables, AUC@5/20, pair (2,3), focal mAA, timing percentiles, RANSAC seeds, ¼× and 4× budgets, 4 px labels, PROSAC, focal prior from the fundamental matrix, threshold 3 / 10 px, refit ablations, choice of view 3, Tzamos et al. Table 2 with the fixed fork, 500-sample full solve, Test B exclusions | [`paper_supplement.py`](scripts/paper_supplement.py) |
 
-Not built yet: the depth-prior row (needs a monocular-depth solver and network) and the supplement's extras
-(PROSAC, focal sampling, the all-pairs sequential variant, Hfff+P3P).
-
-Sequential pipeline, first results (2026-10-26, SP+LG; fork-based):
-
-| Method | Cambridge AUC@10 | median error | f within 10% | ETH3D AUC@10 |
-|---|---|---|---|---|
-| 6pt+P3P (joint) | **54.54** | 3.80° | 60.3% | **70.95** |
-| 4p3vf(M) | 46.93 | 4.75° | 52.4% | 55.79 |
-| Sequential 6pt → P3P | 44.09 | 5.39° | 47.0% | 45.82 |
-
-On clean matches the sequential pipeline is the least accurate: where the two-view focal length is far off, the
-triangulated points are distorted and P3P finds no consensus on view 3.
+Not built (needs code or packages that are not available offline): the depth-prior row, per-iteration focal
+sampling, Hfff+P3P and alphaCertified certification.
 
 ## Known issues in the seed code (fixed here)
 - **Uninitialized and out-of-bounds Jacobian entry in PoseLib@threeview** (found 2026-10-28): both three-view
-  Jacobians zero the part of J12 that does not depend on view 3 starting at column 6, but view 3's parameters
-  start at column 5. Column 5 was never set, so every LM step of the three-view refinement (LO and the final
-  refinement of every three-view estimator, calibrated and shared-focal) used stack garbage; the calibrated one
-  also wrote one value past the end. **Every result from the fork before this fix is superseded.**
+  Jacobians zero the part of J12 that does not depend on view 3 starting at column 6, but view 3's parameters start at
+  column 5. Column 5 was never set, so every LM step of the three-view refinement (LO and the final refinement of every
+  three-view estimator) used stack garbage; the calibrated one also wrote one value past the end. Fixing it moved
+  test A from 1.61 to 1.14 AUC@10.
 - **Out-of-bounds read in `inner_refine`** (both three-view estimators): it copies `sample[k]` for
   k < 4 + `inner_refine_extra`, but a 4p3v sample holds 4 entries, so every '+R' method refined on an arbitrary
   fifth track or faulted (general protection faults on abl-dell). A `reserve(3)` also left P3P reading an empty
-  vector. Fixes 1–3: [`scripts/patches/poselib_oob_fixes.py`](scripts/patches/poselib_oob_fixes.py).
+  vector. All three fixes: [`scripts/patches/poselib_oob_fixes.py`](scripts/patches/poselib_oob_fixes.py).
 - `eval_f.py` forks a `Pool` it never closes; a crashed worker makes it wait forever.
-  [`scripts/eval_f_safe.py`](scripts/eval_f_safe.py) runs it unchanged with a pool that survives worker
-  crashes, retries the task once and saves it for [`scripts/poselib_crash_repro.py`](scripts/poselib_crash_repro.py).
+  [`scripts/eval_f_safe.py`](scripts/eval_f_safe.py) runs it unchanged with a pool that survives worker crashes.
 - `eval_f.py` never sets the RANSAC seed (PoseLib's default is 0), so repeating a run repeats its draws.
   [`scripts/patches/threeview_seed.py`](scripts/patches/threeview_seed.py) reads it from `EVALF_SEED`.
 - `eval_f.py` scores the focal length against view 1 only (`gt_focal_2/3` read `img1`); the released
@@ -115,32 +121,33 @@ triangulated points are distorted and P3P finds no consensus on view 3.
 
 ## Running on abl-dell (no GPU)
 Setup once ([`docs/WORKSTATION_SETUP.md`](docs/WORKSTATION_SETUP.md)), then in `~/learning-algo` with
-`conda activate cvpr` and the data SSD plugged in:
+`conda activate cvpr` and the data SSD plugged in. Run `git pull` first when new steps were added:
 ```bash
-ALLOW_DOWNLOADS=1 bash scripts/run_abl_dell.sh fresh   # the comprehensive run, from scratch, in the background
-bash scripts/run_abl_dell.sh status                     # one-screen progress summary
-bash scripts/run_abl_dell.sh stop                       # stop the runner and every job it started
+ALLOW_DOWNLOADS=1 bash scripts/run_abl_dell.sh fresh    # the comprehensive run, from scratch, in the background
+bash scripts/run_abl_dell.sh setup fundamental sets calib seeds extras ablations table2 fullsolve500 timing paper compare collect
+bash scripts/run_abl_dell.sh status                      # one-screen progress summary
+bash scripts/run_abl_dell.sh stop                        # stop the runner and every job it started
 ```
-Steps in default order (each skips work already done; name steps to run only those): `setup` (git pull,
-patches, fork rebuild when needed, import checks and a smoke test of the new estimators), `machine`,
-`monodromy`, `triplets`, `eth3d`, `sift`, `evalf`, `killA`, `seq`, `control`, `followup` (kill test B with every
-method, the full-solve check, Task 2.8 with the refit and its dated predictions, statistics), `semisynth`,
-`sets`, `geocalib`, `vggt`, `table1`, `curves`, `calib`, `timing` (one pinned core, after every background job),
-`paper` (results/matched and results/paper), `compare`, `crashdebug`, `collect` (copy to the SSD, flushed;
-eject before unplugging). Every low-inlier run comes after the predictions are written. `ALLOW_DOWNLOADS=1`
-lets `geocalib` and `vggt` create `.venv-nets` (CPU PyTorch, GeoCalib, VGGT-1B weights, about 6 GB); without it
-those two rows stay empty. `fresh` archives earlier results to `results/archive/<time>/` (and
-`third_party/threeview/results/archive_<time>/`, the SSD copy to `abl_dell_results_<time>/`); triplets, SIFT
-tracks and network outputs are kept.
+The second command is the large run of supplement and robustness checks.
+
+- **Default steps**, in order: `setup`, `machine`, `monodromy`, `triplets`, `eth3d`, `sift`, `evalf`, `killA`, `seq`,
+  `control`, `followup`, `semisynth`, `sets`, `geocalib`, `vggt`, `table1`, `curves`, `calib`, `timing`, `paper`,
+  `compare`, `crashdebug`, `collect`.
+  - `followup` holds kill test B, the full-solve check, Task 2.8 with its dated predictions, and the statistics.
+  - Every low-inlier run comes after the predictions are written.
+  - `timing` waits for every background job and pins one core.
+  - `ALLOW_DOWNLOADS=1` lets `geocalib` and `vggt` create `.venv-nets` (CPU PyTorch, GeoCalib, VGGT-1B weights, about
+    6 GB).
+- **Large-run steps:** `fundamental`, `seeds`, `extras`, `ablations`, `table2`, `fullsolve500`; the header of
+  [`scripts/run_abl_dell.sh`](scripts/run_abl_dell.sh) describes each one.
 
 ## Earlier work
 Details in [`docs/REPORT.md`](docs/REPORT.md) (written 2026-10-20, before the change of direction).
-- **Tzamos et al. (CVPR 2025) reproduced with their own code:** their best method, 4p3v(M±δ)+R+F+ENM, gets
-  AUC@5 65.99 vs 66.12 in the paper (PhotoTourism). The shared-focal gap also reproduces: 6pt+P3P leads
-  4p3vf(M) by 7.70 AUC@10 on our five Cambridge scenes against 6.91 published, while absolute values sit 2 to
-  3 points below the published ones. *Fork-based: rerun pending.*
-- **The 4p3vf equations behave as derived:** residuals of 3e-15, rank loss of exactly two at coplanar points,
-  the orientation class kept through 98/98 coplanar crossings, and 2,672 = 4 × 668 solutions by monodromy.
+- **Tzamos et al. (CVPR 2025) reproduced with their own code:** their best method, 4p3v(M±δ)+R+F+ENM, gets AUC@5
+  65.99 vs 66.12 in the paper (PhotoTourism). The shared-focal gap reproduces too: with the fixed fork, 6pt+P3P leads
+  4p3vf(M) by 6.79 AUC@10 on our five Cambridge scenes, against 6.91 published.
+- **The 4p3vf equations behave as derived:** residuals of 3e-15, rank loss of exactly two at coplanar points, the
+  orientation class kept through 98/98 coplanar crossings, and 2,672 = 4 × 668 solutions by monodromy.
 - **Their unpublished learned 5th point:** +14 AUC@5 before refinement, nothing after it, 4–6× slower.
 - **Our learned sample-triage prototype (negative result):** ties a one-line spread rule after refinement.
 - **2-view baseline:** PoseLib 5pt LO-RANSAC, mAA@10 0.767 (tutorial val) / 0.709 (test, rebuilt GT).
@@ -197,6 +204,8 @@ scripts/outlier_stats.py        Task 2.8: track labels a / b / w, outlier types,
 scripts/success_rates.py        Task 2.8: s_6, s_M, s_E and hypothesis counts on the tuning scene
 scripts/crossovers.py           Task 2.8: predicted crossover inlier ratios from the cost model, dated
 scripts/semisynth_outliers.py   semi-synthetic outliers (whole-track / view-3 / single-view / mixture) on Cambridge
+scripts/paper_supplement.py     supplement tables of draft v5 (per scene, ablations, Test B, full solve, Table 2)
+scripts/fundamental_focals.py   focal length per triplet from the fundamental matrix (upstream PoseLib, .venv-nets)
 scripts/eval_sets.py            draft v5 evaluation sets: guarded SIFT (primary w < 0.4), SP+LG, timing subsets
 scripts/mr_config.py            draft v5 methods, iteration grids and sets (shared by the runner and the analysis)
 scripts/matched_runtime.py      matched-runtime AUC@10, primary test, inlier-ratio bins, crossovers, Fig. 2

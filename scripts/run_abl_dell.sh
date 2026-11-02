@@ -647,7 +647,7 @@ step_calib() {
         run_evalf "$d" "$SIFT" "mrc-sift_low-$key" -t 5.0 -g --exps "$label" </dev/null || true
     done < <("$PY" scripts/mr_config.py labels calib)
   done
-  f=triplets-semisynth_whole_w25-$FEAT
+  f=triplets-semisynth_whole_w25-${FEAT#triplets-}   # the semi-synthetic feature name (semisynth_outliers.py)
   for d in "$SS"/*/; do
     d=${d%/}; s=$(basename "$d")
     [[ -f $d/$f.txt ]] || continue
@@ -741,6 +741,7 @@ step_collect() {
   mkdir -p "$dst/sets" && cp "$SETS"/manifest.json "$SETS"/labels.csv "$dst/sets/" 2>/dev/null
   cp "$ROOT"/results/vggt/*.times.txt "$dst/" 2>/dev/null
   cp "$TV"/results/focal_*.json "$TV"/results/kill_test_a-*.json "$TV"/results/*-control-*.json "$ROOT"/results/runtime_1core_*.txt "$dst/" 2>/dev/null
+  cp "$TV"/results/*-5.0t-*.json "$dst/" 2>/dev/null   # eval.py (calibrated): Table 3 and its matched-runtime runs
   # Flush to the SSD before saying it is done: on 2026-10-23 the SSD was unplugged right after a copy and all
   # 669 copied files arrived empty (data still in the write cache). Then check that nothing came out empty.
   sync -f "$dst" 2>/dev/null || sync

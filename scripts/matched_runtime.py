@@ -89,8 +89,13 @@ def timing_from(rows, label):
 
 
 def time_curve(T, ks):
-    """T at every count in ks: measured where available, else a + b k fitted on the measured counts >= 300."""
-    meas = {k: v for k, v in T.items()}
+    """T at every count in ks: measured where available, else a + b k fitted on the measured counts >= 300. Time cannot
+    fall as the iteration count grows, so a measured value above a later one (a one-off cost such as a first load
+    landing at a small count) is capped at the smallest later value."""
+    meas, cap = {}, np.inf
+    for k in sorted(T, reverse=True):
+        cap = min(cap, T[k])
+        meas[k] = cap
     fit_k = [k for k in meas if k >= 300] or list(meas)
     if len(fit_k) >= 2:
         b, a = np.polyfit(fit_k, [meas[k] for k in fit_k], 1)

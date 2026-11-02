@@ -105,6 +105,24 @@ def replace(text, old, new, path):
     return text.replace(old, new)
 
 
+PRELOAD_MARK = "untimed: the side files"
+PRELOAD_OLD = "    start = perf_counter()\n"
+PRELOAD_NEW = ("    # untimed: the side files of the focal-prior and network rows load once per worker, outside the timer\n"
+               "    if 'PRIOR(geocalib)' in experiment:\n"
+               "        _h5_table('EVALF_FOCALS')\n"
+               "    if '(INIT)' in experiment:\n"
+               "        _h5_table('EVALF_INIT')\n") + PRELOAD_OLD
+
+
+def preload(src):
+    """Second edit (2026-11-02), applied also where the first one is in: keep the side-file load out of the timing."""
+    text = src.read_text()
+    if PRELOAD_MARK in text:
+        return
+    src.write_text(replace(text, PRELOAD_OLD, PRELOAD_NEW, src))
+    print(f"side-file load moved out of the timing in {src}")
+
+
 def main():
     root = Path(sys.argv[1])
     for name in ("eval_f.py", "eval.py"):
@@ -112,6 +130,8 @@ def main():
         text = src.read_text()
         if MARK in text:
             print(f"draft v5 options already in {src}")
+            if name == "eval_f.py":
+                preload(src)
             continue
         if "\nimport os\n" not in text:
             sys.exit(f"ERROR: {src} does not import os")
@@ -125,6 +145,8 @@ def main():
             text = replace(text, C_SEED_OLD, C_SEED_NEW, src)
         src.write_text(text)
         print(f"draft v5 options added to {src}")
+        if name == "eval_f.py":
+            preload(src)
 
 
 if __name__ == "__main__":

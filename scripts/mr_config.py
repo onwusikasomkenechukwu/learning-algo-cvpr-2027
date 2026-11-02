@@ -30,6 +30,25 @@ CALIB = [
     ("MDenm", "4p3v(M-D) + R + C + ENM", "4p3v(M±δ)+R+F+ENM"),
     ("hc", "4p(HC)", "4p3v(HC)"),
 ]
+# Supplement rows evaluated at matched runtime on the guarded SIFT set only (curves and timing): PROSAC versions of the
+# primary-test methods ('<key>_prosac' is compared with '<key>') and the focal prior from the fundamental matrix
+EXTRA = [
+    ("6p_prosac", "6p3v + PROSAC", "6pt+P3P, PROSAC"),
+    ("seq_prosac", "6p3v + SEQ + PROSAC", "Sequential, PROSAC"),
+    ("Mrefit_prosac", "4p3v(M) + ENM + PROSAC", "4p3vf(M) with refit, PROSAC"),
+    ("fundamental", "5p3v + R + C + PRIOR(fundamental)", "5pt+P3P+R+F at f from F (views 1-2)"),
+]
+# Methods of the primary test also run with these RANSAC seeds on the SIFT set (seed 0 is the main run)
+EXTRA_SEEDS = (1, 2)
+SEED_KEYS = ("6p", "seq", "Mrefit")
+# Matched runtime also read at these multiples of the budget (supplement)
+BUDGET_SCALES = (0.25, 4.0)
+# Default-settings ablations on Cambridge SP+LG (supplement): threshold, choice of view 3, refit variants
+ABLATION = [("6p", "6p3v"), ("seq", "6p3v + SEQ"), ("M", "4p3v(M)"), ("Mrefit", "4p3v(M) + ENM"),
+            ("MDRrefit", "4p3v(M-D) + R + ENM")]
+THRESHOLDS = (3.0, 10.0)
+REFIT_SWITCHES = {"squared": "POSELIB_REFIT_LOSS=squared", "reselect": "POSELIB_REFIT_RESELECT=1",
+                  "newbest": "POSELIB_REFIT_NEWBEST=1"}
 OURS, BASELINES = "Mrefit", ("6p", "seq")
 CALIB_REF = "5p"          # budget of the calibrated matched runtime
 CALIB_T = 5.0             # eval.py -t: the released calibrated table script uses 5 px (100-1000 iterations)
@@ -53,7 +72,9 @@ W_MAX = 0.4
 
 
 def table(name):
-    return {"focal": FOCAL, "default": DEFAULT, "calib": CALIB}[name]
+    return {"focal": FOCAL, "default": DEFAULT, "calib": CALIB, "extra": EXTRA,
+            "seedkeys": [r for r in FOCAL if r[0] in SEED_KEYS],
+            "ablation": [(k, label, k) for k, label in ABLATION]}[name]
 
 
 def main():

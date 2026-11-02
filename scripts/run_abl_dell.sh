@@ -38,6 +38,16 @@
 #              grid, on the timing subsets; waits for every background job first so nothing else runs
 #   paper      scripts/matched_runtime.py (primary test, bins, crossovers, Fig. 2) and scripts/paper_tables.py
 #              (Tables 1 and 3 as LaTeX rows) -> results/matched, results/paper
+#   Supplement and robustness (not default; the large run after the comprehensive one):
+#   fundamental  focal length per triplet from the fundamental matrix (upstream PoseLib, offline, in .venv-nets)
+#   seeds      RANSAC seeds 1-2 of the primary-test methods' curves on the guarded SIFT set
+#   extras     PROSAC versions and the fundamental-matrix prior at matched runtime on the guarded SIFT set
+#   ablations  default settings: threshold 3 / 10 px, refit switches (seeds 0-2), choice of view 3, the F prior row
+#   table2     Tzamos et al.'s Table 2 with the fixed fork (tag fixed), compared with the run before the fixes
+#   fullsolve500  correct-root tool against a full solve on 500 King's College samples
+#   (paper then also writes results/paper/supplement.md; timing also times the extra rows)
+#     bash scripts/run_abl_dell.sh setup fundamental sets calib seeds extras ablations table2 fullsolve500 timing \
+#       paper compare collect
 #   control    5pt+P3P+R+F control row (eval.py '5p3v + R + C') on the released triplets, own results file
 #   eth3d      ETH3D SP+LG triplets (12 scenes, 800 px): every image triplet within one intrinsics block that passes
 #              the overlap test, at most ETH_N = 2000 per scene (Tasks 1.4 / 1.6)
@@ -124,6 +134,13 @@ poselib.estimate_three_view_relative_pose_sequential; poselib.refine_three_view_
 focals_for() {   # GeoCalib focal lengths of a scene (geocalib step), or nothing
   local f
   for f in "$TRIP/$1/geocalib_focals.h5" "$ETRIP/$1/geocalib_focals.h5"; do
+    [[ -f $f ]] && { echo "$f"; return; }
+  done
+}
+
+ffocals_for() {   # ffocals_for <scene> <feature>: focal lengths from the fundamental matrix (fundamental step), or nothing
+  local f
+  for f in "$TRIP/$1/fundamental_focals-$2.h5" "$ETRIP/$1/fundamental_focals-$2.h5"; do
     [[ -f $f ]] && { echo "$f"; return; }
   done
 }
@@ -441,7 +458,7 @@ step_requeue() {
 }
 
 # Every job the runner starts (the processes left behind when the runner itself is stopped)
-JOBS='eval_f_safe.py|homotopy_proto.py|check_fourp3vf.py|prepare_triplets.py|sift_triplets.py|outlier_stats.py|semisynth_outliers.py|success_rates.py|poselib_crash_repro.py|run_tzamos_table.sh|build_seed_code.sh|machine_sheet.sh'
+JOBS='eval_f_safe.py|homotopy_proto.py|check_fourp3vf.py|prepare_triplets.py|sift_triplets.py|outlier_stats.py|semisynth_outliers.py|fundamental_focals.py|full_solve_check.py|geocalib_focals.py|vggt_cameras.py|success_rates.py|poselib_crash_repro.py|run_tzamos_table.sh|build_seed_code.sh|machine_sheet.sh'
 
 step_stop() {   # stop the background runner and every job it started, monodromy included
   local pid
@@ -662,19 +679,23 @@ step_timing() {
   # background job of this runner (monodromy, full-solve check) first, so nothing else runs meanwhile.
   log "timing: waiting for background jobs"; wait
   [[ -f $SETS/manifest.json ]] || { log "timing: no evaluation sets (sets step); skipped"; return; }
-  local grid exps dexps cexps set f d s
+  local grid exps dexps cexps xexps set f d s ex dx
   grid=$("$PY" scripts/mr_config.py grid timing)
   exps=$("$PY" scripts/mr_config.py exps focal)
   dexps=$("$PY" scripts/mr_config.py exps default)
   cexps=$("$PY" scripts/mr_config.py exps calib)
+  xexps=$("$PY" scripts/mr_config.py exps extra)   # supplement rows: timed on the low-inlier subset only
   : >"$OUT/timing.log"
   for set in sift_time splg_time; do
     f=$FEAT; [[ $set == sift_time ]] && f=$SIFT
+    ex=$exps dx=$dexps
+    [[ $set == sift_time ]] && { ex="$exps;$xexps"; dx="$dexps;$xexps"; }
     for d in "$SETS/$set"/*/; do
       d=${d%/}; s=$(basename "$d")
-      EVALF_FOCALS=$(focals_for "$s") EVALF_INIT=$ROOT/results/vggt/$s.h5 \
-        run_timing eval_f.py "$d" "$f" "tm-$set" --exps "$dexps"
-      EVALF_ITERS=$grid EVALF_FOCALS=$(focals_for "$s") run_timing eval_f.py "$d" "$f" "tm-$set" -g --exps "$exps"
+      EVALF_FOCALS=$(focals_for "$s") EVALF_FFOCALS=$(ffocals_for "$s" "$f") EVALF_INIT=$ROOT/results/vggt/$s.h5 \
+        run_timing eval_f.py "$d" "$f" "tm-$set" --exps "$dx"
+      EVALF_ITERS=$grid EVALF_FOCALS=$(focals_for "$s") EVALF_FFOCALS=$(ffocals_for "$s" "$f") \
+        run_timing eval_f.py "$d" "$f" "tm-$set" -g --exps "$ex"
       if [[ $set == sift_time ]]; then
         run_timing eval.py "$d" "$f" "tmc-$set" -t 5.0 --exps "$cexps"
         EVALF_ITERS=$grid run_timing eval.py "$d" "$f" "tmc-$set" -t 5.0 -g --exps "$cexps"
@@ -698,6 +719,120 @@ step_timing() {
   log "timing: done (pinned to core ${TIME_CORE:-2}; $OUT/timing.log)"
 }
 
+step_fundamental() {
+  # focal length per triplet from the fundamental matrix of views 1-2 (supplement row '5p3v + R + C + PRIOR(fundamental)'):
+  # upstream PoseLib 2.0.5 from the SSD wheelhouse into .venv-nets (offline), one process per scene
+  [[ -x $NETPY ]] || { log "fundamental: $NETPY missing (create it with the geocalib step); skipped"; return; }
+  "$NETPY" -c "import poselib; poselib.focals_from_fundamental_iterative" 2>/dev/null \
+    || "$NETPY" -m pip install --no-index --find-links "$SSD/wheelhouse" poselib==2.0.5 >"$OUT/fundamental_install.log" 2>&1 \
+    || { log "fundamental: could not install upstream PoseLib from $SSD/wheelhouse (see log); skipped"; return; }
+  local dir img s f pids=()
+  while read -r dir img; do
+    s=$(basename "$dir"); [[ $s == courtyard ]] && continue
+    ( for f in "$FEAT" "$SIFT"; do
+        [[ -f $dir/$f.txt ]] && OMP_NUM_THREADS=1 "$NETPY" -W ignore scripts/fundamental_focals.py "$dir" --feature "$f"
+      done ) >"$OUT/fundamental_$s.log" 2>&1 </dev/null &
+    pids+=($!)
+  done < <(finished_dirs)
+  wait "${pids[@]}"
+  cat "$OUT"/fundamental_*.log | grep -a "fallbacks" | sed "s/^/fundamental: /"
+}
+
+step_seeds() {
+  # RANSAC seeds 1 and 2 for the primary-test methods' curves on the guarded SIFT set (seed 0 is the curves step)
+  [[ -f $SETS/manifest.json ]] || { log "seeds: no evaluation sets; skipped"; return; }
+  local grid d s key label sd
+  grid=$("$PY" scripts/mr_config.py grid curves)
+  for sd in 1 2; do
+    for d in "$SETS/sift"/*/; do
+      d=${d%/}; s=$(basename "$d")
+      while IFS=$'\t' read -r key label; do
+        EVALF_SEED=$sd EVALF_ITERS=$grid RUN_JSON=$TV/results/focal_$s-graph-mr-sift-$key-s$sd-$SIFT.json \
+          run_evalf "$d" "$SIFT" "mr-sift-$key-s$sd" -g --exps "$label" </dev/null || true
+      done < <("$PY" scripts/mr_config.py labels seedkeys)
+    done
+  done
+}
+
+step_extras() {
+  # supplement rows at matched runtime on the guarded SIFT set: PROSAC versions of the primary-test methods and the
+  # focal prior from the fundamental matrix (their timing is in the timing step)
+  [[ -f $SETS/manifest.json ]] || { log "extras: no evaluation sets; skipped"; return; }
+  local grid d s key label
+  grid=$("$PY" scripts/mr_config.py grid curves)
+  for d in "$SETS/sift"/*/; do
+    d=${d%/}; s=$(basename "$d")
+    while IFS=$'\t' read -r key label; do
+      EVALF_ITERS=$grid EVALF_FFOCALS=$(ffocals_for "$s" "$SIFT") \
+        RUN_JSON=$TV/results/focal_$s-graph-mr-sift-$key-$SIFT.json \
+        run_evalf "$d" "$SIFT" "mr-sift-$key" -g --exps "$label" </dev/null || true
+    done < <("$PY" scripts/mr_config.py labels extra)
+  done
+}
+
+step_ablations() {
+  # supplement ablations at default settings: RANSAC threshold 3 / 10 px and the refit switches (Cambridge SP+LG), the
+  # choice of view 3 (sets <set>_v3 against the same triplets in the original order), the fundamental-matrix prior
+  local abl refit d s t sw sd base f dir img
+  abl=$("$PY" scripts/mr_config.py exps ablation)
+  refit="4p3v(M) + ENM;4p3v(M-D) + R + ENM"
+  for s in "${SCENES[@]}"; do
+    cam_done "$s" || continue
+    for t in 3 10; do
+      EVALF_THRESHOLD=$t run_evalf "$TRIP/$s" "$FEAT" "th$t" --exps "$abl" </dev/null || true
+    done
+    for sw in squared reselect newbest; do
+      for sd in 0 1 2; do
+        ( case $sw in
+            squared) export POSELIB_REFIT_LOSS=squared ;;
+            reselect) export POSELIB_REFIT_RESELECT=1 ;;
+            newbest) export POSELIB_REFIT_NEWBEST=1 ;;
+          esac
+          EVALF_SEED=$sd run_evalf "$TRIP/$s" "$FEAT" "ra-$sw-s$sd" --exps "$refit" </dev/null ) || true
+      done
+    done
+  done
+  if [[ -f $SETS/manifest.json ]]; then
+    for base in splg sift_low; do
+      f=$FEAT; [[ $base == sift_low ]] && f=$SIFT
+      for d in "$SETS/${base}_v3"/*/; do
+        [[ -d $d ]] || continue
+        d=${d%/}; s=$(basename "$d")
+        run_evalf "$SETS/$base/$s" "$f" vo --exps "$abl" </dev/null || true
+        run_evalf "$d" "$f" v3 --exps "$abl" </dev/null || true
+      done
+    done
+  fi
+  while read -r dir img; do
+    s=$(basename "$dir"); [[ $s == courtyard ]] && continue
+    EVALF_FFOCALS=$(ffocals_for "$s" "$FEAT") run_evalf "$dir" "$FEAT" sup-s0 \
+      --exps "5p3v + R + C + PRIOR(fundamental)" </dev/null || true
+  done < <(finished_dirs)
+}
+
+step_table2() {
+  # Tzamos et al.'s Table 2 (21 methods, PhotoTourism and Aachen) with the fixed fork, next to the run of 2026-10-19:
+  # the calibrated reproduction and the effect of the three fixes
+  if [[ ! -f $OUT/table2.done ]]; then
+    "${ONE_THREAD[@]}" bash scripts/run_tzamos_table.sh --table --tag fixed >"$OUT/table2.log" 2>&1 && touch "$OUT/table2.done"
+  fi
+  "$PY" scripts/compare_tzamos_table.py "$TV/results" fixed >"$OUT/table2_fixed.txt" 2>&1
+  "$PY" scripts/compare_tzamos_table.py "$TV/results" >"$OUT/table2_before_fixes.txt" 2>&1
+  log "table2: $OUT/table2_fixed.txt (before the fixes: $OUT/table2_before_fixes.txt)"
+}
+
+step_fullsolve500() {
+  # the correct-root tool against a full solve on 500 King's College samples (the draft asks for 500; followup did 100)
+  local fs=$OUT/fullsolve
+  [[ -f $fs/monodromy_0.npz ]] || { log "fullsolve500: $fs/monodromy_0.npz missing (followup step); skipped"; return; }
+  [[ -f $fs/KingsCollege500_summary.json ]] && { log "fullsolve500 already done"; return; }
+  OMP_NUM_THREADS=1 "$PY" -u -W ignore src/full_solve_check.py --start "$fs/monodromy_0.npz" --mode triplets \
+    --scene "$TRIP/KingsCollege" --nvm "$CAM/KingsCollege/reconstruction.nvm" --n 500 --rng 1 --nproc "$NW" \
+    --out "$fs/KingsCollege500" >"$OUT/fullsolve_KingsCollege500.log" 2>&1 \
+    || log "fullsolve500: failed (see $OUT/fullsolve_KingsCollege500.log)"
+  log "fullsolve500: $(tail -c 300 "$OUT/fullsolve_KingsCollege500.log" | tr '\r' '\n' | tail -1)"
+}
+
 step_paper() {
   # matched-runtime analysis (primary test, bins, crossovers, Fig. 2) and Tables 1 and 3 as LaTeX rows
   "$PY" -W ignore scripts/matched_runtime.py --results "$TV/results" --sets "$SETS" --semisynth "$SS/manifest.json" \
@@ -706,6 +841,9 @@ step_paper() {
   "$PY" -W ignore scripts/paper_tables.py --results "$TV/results" --sets "$SETS" \
     --matched "$ROOT/results/matched/summary.json" --vggt "$ROOT/results/vggt" --out "$ROOT/results/paper" \
     >"$OUT/paper_tables.log" 2>&1 || log "paper: paper_tables.py failed (see $OUT/paper_tables.log)"
+  "$PY" -W ignore scripts/paper_supplement.py --results "$TV/results" --sets "$SETS" --killb "$ROOT/results/killB" \
+    --fullsolve "$OUT/fullsolve" --table2 "$OUT/table2_fixed.txt" --out "$ROOT/results/paper" \
+    >"$OUT/paper_supplement.log" 2>&1 || log "paper: paper_supplement.py failed (see $OUT/paper_supplement.log)"
   grep -a "intersection-union" "$ROOT/results/matched/matched.md" 2>/dev/null | sed "s/^/paper: /"
   log "paper: results/matched/{matched.md,fig2.png,summary.json}, results/paper/{tables.md,table1_rows.tex,table3_rows.tex}"
 }

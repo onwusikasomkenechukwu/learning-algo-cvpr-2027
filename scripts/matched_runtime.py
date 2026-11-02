@@ -221,9 +221,10 @@ def main():
     R = args.results
     man = json.loads((args.sets / "manifest.json").read_text())
     labels = {}
+    num = lambda v: float(v) if v not in ("", None) else None
     for r in csv.DictReader(open(args.sets / "labels.csv", newline="")):
-        labels[r["set"], r["scene"], r["triplet"]] = dict(w=float(r["w"]), a=float(r["a"]), b=float(r["b"]),
-                                                          matcher=r["matcher"])
+        labels[r["set"], r["scene"], r["triplet"]] = dict(w=float(r["w"]), a=num(r["a"]), b=num(r["b"]),
+                                                          w4=num(r.get("w4")), matcher=r["matcher"])
     pred = json.loads(args.predictions.read_text()) if args.predictions and args.predictions.exists() else None
     summary = dict(settings=dict(grids=C.GRIDS, ours=C.OURS, baselines=C.BASELINES, w_max=C.W_MAX, boot=args.boot),
                    budgets={}, readings={}, auc={}, primary={}, bins={}, semisynth={}, calibrated={})
@@ -255,30 +256,58 @@ def main():
         Tk = time_curve(tim[key][0], ks)
         return reading(Tk, B), Tk
 
-    # ---- shared focal: sets sift (primary = w < W_MAX) and splg
+    # ---- shared focal: sets sift (primary = w < W_MAX) and splg; the sift set also has the extra rows
+    # (mr_config.EXTRA) and, for some methods, more RANSAC seeds (tags ...-s<k>): a triplet's matched value is the
+    # mean over the seeds it has
     per_trip = {}       # (set, key) -> {(scene, triplet): matched value}
+    cache = {}          # (set, key) -> (curves per seed and scene, timing entry)
+    summary["seeds"] = {}
+
+    def values(set_name, key, B):
+        """Per-triplet matched values of one method at budget B (mean over seeds), with the reading used."""
+        curs_by_seed, tim_key = cache[set_name, key]
+        rd, _ = read_at({key: tim_key}, key, B, [c for cs in curs_by_seed.values() for c in cs.values()])
+        if rd is None:
+            return {}, None
+        acc = defaultdict(list)
+        for cs in curs_by_seed.values():
+            for s, cur in cs.items():
+                for tr, v in matched_values(cur, rd).items():
+                    acc[s, tr].append(v)
+        return {k: float(np.mean(v)) for k, v in acc.items()}, rd
+
     for set_name, time_set in (("sift", "sift_time"), ("splg", "splg_time")):
         feat = man["sets"].get(set_name, {}).get("feature")
         if not feat:
             continue
-        tim = timing("focal_", time_set, man["sets"][time_set]["feature"], set_scenes(time_set), C.FOCAL, "tm")
+        table = C.FOCAL + (C.EXTRA if set_name == "sift" else [])
+        tim = timing("focal_", time_set, man["sets"][time_set]["feature"], set_scenes(time_set), table, "tm")
         B = budget(tim, C.FOCAL_REF)
         summary["budgets"][set_name] = B
         summary["readings"][set_name] = {}
         keep = (lambda s, tr: ("sift", s, tr) in labels and labels["sift", s, tr]["w"] < C.W_MAX) \
             if set_name == "sift" else (lambda s, tr: True)
         summary.setdefault("curves", {})[set_name] = {}
-        for key, label, _ in C.FOCAL:
-            curs = {s: curves_from(load(R / f"focal_{s}-graph-mr-{set_name}-{key}-{feat}.json"), label)
-                    for s in set_scenes(set_name)}
-            rd, Tk = read_at(tim, key, B, curs.values())
+        for key, label, _ in table:
+            curs_by_seed = {0: {s: curves_from(load(R / f"focal_{s}-graph-mr-{set_name}-{key}-{feat}.json"), label)
+                                for s in set_scenes(set_name)}}
+            for sd in C.EXTRA_SEEDS:
+                cs = {s: curves_from(load(R / f"focal_{s}-graph-mr-{set_name}-{key}-s{sd}-{feat}.json"), label)
+                      for s in set_scenes(set_name)}
+                if any(cs.values()):
+                    curs_by_seed[sd] = cs
+            if key not in tim:
+                continue
+            cache[set_name, key] = (curs_by_seed, tim[key])
+            vals, rd = values(set_name, key, B)
             if rd is None:
                 continue
+            summary["seeds"].setdefault(set_name, {})[key] = sorted(curs_by_seed)
             summary["readings"][set_name][key] = dict(k_lo=rd[0], k_hi=rd[1], lam=rd[2])
-            vals, at_k = {}, defaultdict(lambda: defaultdict(list))
+            _, Tk = read_at(tim, key, B, [c for cs in curs_by_seed.values() for c in cs.values()])
+            curs = curs_by_seed[0]
+            at_k = defaultdict(lambda: defaultdict(list))
             for s, cur in curs.items():
-                for tr, v in matched_values(cur, rd).items():
-                    vals[s, tr] = v
                 for tr, c in cur.items():
                     if keep(s, tr):
                         for k, v in c.items():
@@ -298,8 +327,8 @@ def main():
         return {s: np.array(v) for s, v in d.items()}
 
     low = lambda s, tr: ("sift", s, tr) in labels and labels["sift", s, tr]["w"] < C.W_MAX
-    summary["auc"]["sift_low"] = {k: scene_auc(by_scene(per_trip[("sift", k)], low)) for _, k in
-                                  [(None, k) for k, _, _ in C.FOCAL] if ("sift", k) in per_trip}
+    summary["auc"]["sift_low"] = {k: scene_auc(by_scene(per_trip[("sift", k)], low)) for k, _, _ in C.FOCAL + C.EXTRA
+                                  if ("sift", k) in per_trip}
     summary["auc"]["splg"] = {k: scene_auc(by_scene(per_trip[("splg", k)])) for k, _, _ in C.FOCAL
                               if ("splg", k) in per_trip}
 
@@ -318,6 +347,39 @@ def main():
             res["intersection_union_p"] = p
             res["superior_at_0.05"] = bool(p < 0.05)
         summary["primary"] = res
+
+    def primary_test(pt, keep, n_boot):
+        """The primary comparison on triplets passing keep, from per-triplet values pt[key]."""
+        out = {}
+        if C.OURS not in pt:
+            return out
+        for base in C.BASELINES:
+            if base in pt:
+                d = {k: pt[C.OURS][k] - pt[base][k] for k in pt[C.OURS] if k in pt[base] and keep(*k)}
+                out[base] = summarize_diff(by_scene(d), n_boot, rng)
+        if len(out) == len(C.BASELINES):
+            out["intersection_union_p"] = max(r["p_one_sided"] for r in out.values())
+        return out
+
+    # ---- robustness of the primary result (supplement): labels at the second threshold, other budgets, PROSAC
+    sift_vals = {k: v for (st, k), v in per_trip.items() if st == "sift"}
+    low4 = lambda s, tr: ("sift", s, tr) in labels and labels["sift", s, tr]["w4"] is not None \
+        and labels["sift", s, tr]["w4"] < C.W_MAX
+    summary["primary_theta2"] = primary_test(sift_vals, low4, min(args.boot, 2000))
+    summary["sensitivity"] = {}
+    for scale in C.BUDGET_SCALES:
+        if not summary["budgets"].get("sift"):
+            break
+        pv = {k: values("sift", k, scale * summary["budgets"]["sift"])[0] for st, k in cache if st == "sift"}
+        summary["sensitivity"][str(scale)] = dict(
+            auc={k: scene_auc(by_scene(v, low)) for k, v in pv.items() if v},
+            primary=primary_test(pv, low, min(args.boot, 2000)))
+    summary["prosac"] = {}
+    for key, _, _ in C.EXTRA:
+        base = key[:-len("_prosac")] if key.endswith("_prosac") else None
+        if base and key in sift_vals and base in sift_vals:
+            d = {k: sift_vals[key][k] - sift_vals[base][k] for k in sift_vals[key] if k in sift_vals[base] and low(*k)}
+            summary["prosac"][base] = summarize_diff(by_scene(d), min(args.boot, 2000), rng)
 
     # ---- bins (Fig. 2a): guarded SIFT and SP+LG pooled
     pooled = []
@@ -458,14 +520,33 @@ def fmt(v, d=2):
     return "-" if v is None else f"{v:.{d}f}"
 
 
+def diff_line(name, r):
+    if not r or not r.get("triplets"):
+        return f"- {name}: no paired triplets"
+    return (f"- {name}: {fmt(r['estimate'])} AUC@10, 95% CI [{fmt(r['ci95'][0])}, {fmt(r['ci95'][1])}], "
+            f"one-sided p = {r['p_one_sided']:.4g}, {r['triplets']} triplets")
+
+
 def write_md(s, md, out):
-    names = {k: n for k, _, n in C.FOCAL}
+    names = {k: n for k, _, n in C.FOCAL + C.EXTRA}
     md += [f"Budgets (mean single-core ms of {C.FOCAL_REF} at default settings): " +
            ", ".join(f"{k} {fmt(v)}" for k, v in s["budgets"].items()), ""]
-    md += ["| Method | SIFT, w < %.1f | SP+LG |" % C.W_MAX, "|---|---|---|"]
-    for k, _, n in C.FOCAL:
-        md.append(f"| {n} | {fmt(s['auc'].get('sift_low', {}).get(k))} | {fmt(s['auc'].get('splg', {}).get(k))} |")
+    md += ["| Method | SIFT, w < %.1f | SP+LG | RANSAC seeds (SIFT) |" % C.W_MAX, "|---|---|---|---|"]
+    for k, _, n in C.FOCAL + C.EXTRA:
+        md.append(f"| {n} | {fmt(s['auc'].get('sift_low', {}).get(k))} | {fmt(s['auc'].get('splg', {}).get(k))} | "
+                  f"{s.get('seeds', {}).get('sift', {}).get(k, '-')} |")
     md.append("")
+    if s.get("primary_theta2"):
+        md.append(f"Primary test with labels at the second threshold (w < {C.W_MAX} at 4 px):")
+        md += [diff_line(f"vs {names[b]}", s["primary_theta2"].get(b)) for b in C.BASELINES]
+        md += [f"- intersection-union p = {s['primary_theta2'].get('intersection_union_p', float('nan')):.4g}", ""]
+    for scale, d in s.get("sensitivity", {}).items():
+        md.append(f"Budget x {scale}: " + ", ".join(f"{names[k]} {fmt(v)}" for k, v in d["auc"].items()))
+        md += [diff_line(f"primary vs {names[b]}", d["primary"].get(b)) for b in C.BASELINES]
+        md += [f"- intersection-union p = {d['primary'].get('intersection_union_p', float('nan')):.4g}", ""]
+    if s.get("prosac"):
+        md.append("PROSAC minus uniform sampling, same method (SIFT, w < %.1f):" % C.W_MAX)
+        md += [diff_line(names[b], r) for b, r in s["prosac"].items()] + [""]
     if s["primary"]:
         md.append(f"Primary test, {names[C.OURS]} minus each baseline on the guarded SIFT triplets with w < {C.W_MAX}:")
         for base in C.BASELINES:

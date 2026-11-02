@@ -4,7 +4,7 @@ Pools all triplets of a dataset, as their utils/tables.py does: error = max(mean
 translation error) over pairs (1,2) and (1,3); NaN -> 180; AUC@k = mean over integer thresholds 1..k deg
 of the fraction below threshold, in percent. PhotoTourism = their 12 scenes (st_peters_square excluded).
 
-    python scripts/compare_tzamos_table.py [results_dir]
+    python scripts/compare_tzamos_table.py [results_dir] [tag]
 """
 import json
 import sys
@@ -61,10 +61,11 @@ def runtime(rows):
 
 def main():
     rdir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parents[1] / "third_party/threeview/results"
+    tag = f"-{sys.argv[2]}" if len(sys.argv) > 2 else ""   # a tagged run (run_tzamos_table.sh --tag), e.g. fixed
     for ds, scenes in DATASETS.items():
         results, missing = [], []
         for sc in scenes:
-            p = rdir / f"{sc}-5.0t-{FEAT}.json"
+            p = rdir / f"{sc}-5.0t{tag}-{FEAT}.json"
             if p.exists():
                 results += json.loads(p.read_text())
             else:

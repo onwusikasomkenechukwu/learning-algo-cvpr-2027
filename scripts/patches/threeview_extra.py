@@ -14,6 +14,10 @@ eval_f.py, rows that run the three-view shared-focal LO from given cameras (pose
   '5p3v + R + C + PRIOR(geocalib)'  the same at the focal length in $EVALF_FOCALS (h5: image name -> f in pixels,
                                     from scripts/geocalib_focals.py); an image without one runs at the
                                     guessed f and is flagged (prior_missing)
+  '5p3v + R + C + PRIOR(fundamental)'  the same at a focal length per triplet in $EVALF_FFOCALS (h5: 'img1-img2-img3'
+                                    -> f, from the fundamental matrix of views 1-2, scripts/fundamental_focals.py)
+  '<label> + PROSAC'                tracks ordered by match quality and PoseLib's progressive sampling (PROSAC)
+  EVALF_THRESHOLD                   RANSAC threshold in pixels (default 5, the released value)
   '0p3v(INIT)'                      cameras from $EVALF_INIT (h5: 'img1-img2-img3' -> R12 (9), t12 (3), R13 (9),
                                     t13 (3), f; from scripts/vggt_cameras.py); a missing triplet starts from identity
                                     poses at the guessed focal length and is flagged (init_missing)
@@ -114,6 +118,49 @@ PRELOAD_NEW = ("    # untimed: the side files of the focal-prior and network row
                "        _h5_table('EVALF_INIT')\n") + PRELOAD_OLD
 
 
+STAGE3_MARK = "EVALF_THRESHOLD"
+STAGE3 = [   # third edit (2026-11-02, the large run), eval_f.py only
+    # threshold ablation (3 and 10 px) and PROSAC rows; after the seed line of threeview_seed.py
+    ("    ransac_dict['seed'] = int(os.environ.get('EVALF_SEED', '0'))  # repeated runs (kill test A)\n",
+     "    ransac_dict['seed'] = int(os.environ.get('EVALF_SEED', '0'))  # repeated runs (kill test A)\n"
+     "    ransac_dict['max_epipolar_error'] = float(os.environ.get('EVALF_THRESHOLD', '5.0'))  # threshold ablation\n"
+     "    ransac_dict['progressive_sampling'] = '+ PROSAC' in experiment  # tracks come ordered by match quality\n"),
+    # PROSAC rows get the tracks ordered by match quality (SIFT: the larger SNN ratio of 1-2 and 1-3, smallest first;
+    # LightGlue: the smaller score of 1-2 and 1-3, largest first); every other row keeps the file order
+    ("                for iterations in iterations_list:\n",
+     "                q = pts[l, 6:8]\n"
+     "                order = np.argsort(q.max(axis=1), kind='stable') if 'SIFT_triplet_correspondences' in "
+     "matches_basename \\\n"
+     "                    else np.argsort(-q.min(axis=1), kind='stable')\n"
+     "                if len(order) != len(x1):   # force_inliers changed the tracks: keep their order\n"
+     "                    order = np.arange(len(x1))\n"
+     "                xq = (x1[order], x2[order], x3[order])\n"
+     "                for iterations in iterations_list:\n"),
+    ("                        yield experiment, iterations, img1, img2, img3, x1, x2, x3, R_dict_l, T_dict_l, camera_dicts_l\n",
+     "                        xx = xq if '+ PROSAC' in experiment else (x1, x2, x3)\n"
+     "                        yield (experiment, iterations, img1, img2, img3) + xx + (R_dict_l, T_dict_l, camera_dicts_l)\n"),
+    # focal prior per triplet from the fundamental matrix of views 1-2 (scripts/fundamental_focals.py)
+    ("        if 'PRIOR(geocalib)' in experiment:\n            fp = _h5_table('EVALF_FOCALS').get(img1)\n",
+     "        if 'PRIOR(geocalib)' in experiment or 'PRIOR(fundamental)' in experiment:\n"
+     "            fp = _h5_table('EVALF_FOCALS').get(img1) if 'PRIOR(geocalib)' in experiment \\\n"
+     "                else _h5_table('EVALF_FFOCALS').get(f'{img1}-{img2}-{img3}')\n"),
+    ("    if '(INIT)' in experiment:\n        _h5_table('EVALF_INIT')\n",
+     "    if '(INIT)' in experiment:\n        _h5_table('EVALF_INIT')\n"
+     "    if 'PRIOR(fundamental)' in experiment:\n        _h5_table('EVALF_FFOCALS')\n"),
+]
+
+
+def stage3(src):
+    """Threshold override, PROSAC rows and the fundamental-matrix focal prior (applied after preload)."""
+    text = src.read_text()
+    if STAGE3_MARK in text:
+        return
+    for old, new in STAGE3:
+        text = replace(text, old, new, src)
+    src.write_text(text)
+    print(f"threshold, PROSAC and fundamental-matrix prior added to {src}")
+
+
 def preload(src):
     """Second edit (2026-11-02), applied also where the first one is in: keep the side-file load out of the timing."""
     text = src.read_text()
@@ -132,6 +179,7 @@ def main():
             print(f"draft v5 options already in {src}")
             if name == "eval_f.py":
                 preload(src)
+                stage3(src)
             continue
         if "\nimport os\n" not in text:
             sys.exit(f"ERROR: {src} does not import os")
@@ -147,6 +195,7 @@ def main():
         print(f"draft v5 options added to {src}")
         if name == "eval_f.py":
             preload(src)
+            stage3(src)
 
 
 if __name__ == "__main__":

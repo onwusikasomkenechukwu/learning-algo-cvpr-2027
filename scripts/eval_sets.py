@@ -62,9 +62,14 @@ def main():
     ap.add_argument("--splg-n", type=int, default=1000)
     ap.add_argument("--time-n", type=int, default=100)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--theta2", type=float, default=4.0, help="second label threshold (w4 column of labels.csv)")
+    ap.add_argument("--view3", nargs="*", default=["splg", "sift_low"],
+                    help="sets also written with views 2 and 3 swapped, as <set>_v3 (choice of view 3)")
     args = ap.parse_args()
 
     roots = {"cambridge": args.cambridge, "eth3d": args.eth3d}
+    w2 = {(r["scene"], r["matcher"], r["triplet"]): float(r["w"]) for r in csv.DictReader(open(args.labels, newline=""))
+          if abs(float(r["theta"]) - args.theta2) < 1e-9}
     rows = [r for r in csv.DictReader(open(args.labels, newline=""))
             if abs(float(r["theta"]) - args.theta) < 1e-9 and r["scene"] != TUNING and roots.get(r["dataset"])]
     for r in rows:
@@ -107,10 +112,45 @@ def main():
             (dst / f"{feat}.txt").write_text("".join(l.strip() + "\n" for l in order))
             manifest["sets"][name]["scenes"][s] = dict(dataset=dataset, triplets=len(order), dir=str(dst))
             label_rows += [dict(set=name, dataset=dataset, scene=s, matcher=r["matcher"], triplet=r["triplet"],
-                                a=r["a"], b=r["b"], w=r["w"], n=r["n"], n_inl=r["n_inl"]) for r in chosen]
+                                a=r["a"], b=r["b"], w=r["w"], n=r["n"], n_inl=r["n_inl"],
+                                w4=w2.get((s, r["matcher"], r["triplet"]), "")) for r in chosen]
         n = sum(v["triplets"] for v in manifest["sets"][name]["scenes"].values())
         manifest["sets"][name]["triplets"] = n
         print(f"{name}: {n} triplets in {len(manifest['sets'][name]['scenes'])} scenes", flush=True)
+
+    # choice of view 3: the same triplets with views 2 and 3 swapped (tracks, scores and names); the inlier ratio and
+    # both score filters are symmetric in views 2 and 3, so the tracks used and the primary set do not change
+    import h5py
+    for name in args.view3:
+        per_scene, feat = sets[name]
+        vname = f"{name}_v3"
+        manifest["sets"][vname] = dict(feature=feat, scenes={}, swapped_views="2 and 3")
+        for dataset, s in scenes:
+            chosen = per_scene.get(s) or []
+            if not chosen:
+                continue
+            src, dst = roots[dataset] / s, args.out / vname / s
+            dst.mkdir(parents=True, exist_ok=True)
+            for f in ("K.h5", "R.h5", "T.h5"):
+                link(src / f, dst / f)
+            keep = {r["triplet"] for r in chosen}
+            order = [l.split() for l in (src / f"{feat}.txt").read_text().splitlines() if l.strip() in keep]
+            with h5py.File(src / f"{feat}.h5", "r") as fi, h5py.File(dst / f"{feat}.h5", "w") as fo:
+                for n1, n2, n3 in order:
+                    m = np.array(fi[f"{n1}-{n2}-{n3}"])
+                    cols = [0, 1, 4, 5, 2, 3, 7, 6] + list(range(8, m.shape[1]))   # x1, x3, x2, s13, s12, ...
+                    fo.create_dataset(f"{n1}-{n3}-{n2}", data=m[:, cols])
+            (dst / f"{feat}.txt").write_text("".join(f"{n1} {n3} {n2}\n" for n1, n2, n3 in order))
+            manifest["sets"][vname]["scenes"][s] = dict(dataset=dataset, triplets=len(order), dir=str(dst))
+            by_t = {r["triplet"]: r for r in chosen}
+            for n1, n2, n3 in order:
+                r = by_t[f"{n1} {n2} {n3}"]
+                label_rows.append(dict(set=vname, dataset=dataset, scene=s, matcher=r["matcher"],
+                                       triplet=f"{n1} {n3} {n2}", a="", b="", w=r["w"], n=r["n"], n_inl=r["n_inl"],
+                                       w4=w2.get((s, r["matcher"], r["triplet"]), "")))
+        n = sum(v["triplets"] for v in manifest["sets"][vname]["scenes"].values())
+        manifest["sets"][vname]["triplets"] = n
+        print(f"{vname}: {n} triplets (views 2 and 3 swapped)", flush=True)
     with open(args.out / "labels.csv", "w", newline="") as fh:
         wr = csv.DictWriter(fh, fieldnames=list(label_rows[0]))
         wr.writeheader()

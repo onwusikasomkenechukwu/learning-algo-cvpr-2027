@@ -48,6 +48,8 @@
 #   (paper then also writes results/paper/supplement.md; timing also times the extra rows)
 #     bash scripts/run_abl_dell.sh setup fundamental sets calib seeds extras ablations table2 fullsolve500 timing \
 #       paper compare collect
+#   archive    (not default) pack results, raw outputs, weights and environment lists into ~/archives/cvpr2027_<date>/,
+#              back them up to $SSD/archives/ and verify; ARCHIVE_REMOVE=1 then removes the archived originals
 #   control    5pt+P3P+R+F control row (eval.py '5p3v + R + C') on the released triplets, own results file
 #   eth3d      ETH3D SP+LG triplets (12 scenes, 800 px): every image triplet within one intrinsics block that passes
 #              the overlap test, at most ETH_N = 2000 per scene (Tasks 1.4 / 1.6)
@@ -869,6 +871,80 @@ step_thresh() {
 step_runtime() {
   bash scripts/runtime_single_core.sh >"$OUT/runtime.log" 2>&1
   log "single-core runtime done (see $OUT/runtime.log and results/runtime_1core_$(hostname -s).txt)"
+}
+
+step_archive() {
+  # Pause of the study (2026-11-03: it goes to TMLR, to be resumed in a few weeks). Packs every result, the raw
+  # evaluation outputs, the network weights and the environment lists into ~/archives/cvpr2027_<date>/ (tar + gzip,
+  # pigz when installed), copies that folder to $SSD/archives/ as the backup and verifies both copies (gzip test,
+  # member counts, sha256). Nothing is removed unless ARCHIVE_REMOVE=1, and then only after every archive verified and
+  # only the archived results and weight caches (never code, environments or the datasets on the SSD).
+  pgrep -f "$JOBS" >/dev/null && die "archive: jobs of a run are still going (wait, or bash scripts/run_abl_dell.sh stop)"
+  local day dir bak gz item name parent member n_src n_tar need avail
+  day=$(date +%Y%m%d)
+  dir=$HOME/archives/cvpr2027_$day bak=$SSD/archives/cvpr2027_$day gz=gzip
+  command -v pigz >/dev/null && gz="pigz -p $NW"
+  local items=("results|$ROOT|results" "threeview_results|$TV|results" "weights_torch|$HOME/.cache/torch|hub"
+               "weights_huggingface|$HOME/.cache|huggingface")
+  need=0
+  for item in "${items[@]}"; do
+    IFS='|' read -r name parent member <<<"$item"
+    [[ -e $parent/$member ]] && need=$((need + $(du -sb "$parent/$member" | cut -f1)))
+  done
+  # today's archives are reused when both copies verify and no archived file changed since they were written
+  local fresh=1
+  if [[ -f $dir/SHA256SUMS && -f $bak/SHA256SUMS ]] && ( cd "$dir" && sha256sum -c --quiet SHA256SUMS ) \
+     && ( cd "$bak" && sha256sum -c --quiet SHA256SUMS ); then
+    fresh=0
+    for item in "${items[@]}"; do
+      IFS='|' read -r name parent member <<<"$item"
+      [[ -e $parent/$member && -n $(find "$parent/$member" -newer "$dir/SHA256SUMS" ! -path "$OUT/*" -print -quit) ]] && fresh=1
+    done
+  fi
+  if (( fresh == 0 )); then
+    log "archive: today's archives in $dir and $bak are verified and current; not packing again"
+  else
+  avail=$(df --output=avail -B1 "$HOME" | tail -1)
+  (( avail > need )) || die "archive: $((need >> 30)) GB to pack but only $((avail >> 30)) GB free in $HOME"
+  mkdir -p "$dir"
+  log "archive: packing $((need >> 30)) GB into $dir ($gz)"
+  for item in "${items[@]}"; do
+    IFS='|' read -r name parent member <<<"$item"
+    [[ -e $parent/$member ]] || { log "archive: $parent/$member missing; skipped"; continue; }
+    tar -C "$parent" -cf - "$member" | $gz >"$dir/$name.tar.gz" || die "archive: packing $name failed"
+    $gz -t "$dir/$name.tar.gz" || die "archive: $name.tar.gz does not test"
+    n_src=$(find "$parent/$member" | wc -l)
+    n_tar=$(tar -tzf "$dir/$name.tar.gz" | wc -l)
+    (( n_src == n_tar )) || die "archive: $name has $n_src entries but the archive $n_tar"
+    log "archive: $name.tar.gz $(du -h "$dir/$name.tar.gz" | cut -f1) ($n_tar entries, from $(du -sh "$parent/$member" | cut -f1))"
+  done
+  { echo "CVPR 2027 / TMLR study, archived $(date '+%F %T') on $(hostname)"
+    echo "git: $(git -C "$ROOT" log -1 --format='%H %cd %s')"
+    echo "fork build stamp: $(cat "$ROOT/third_party/PoseLib-threeview/.build_stamp" 2>/dev/null)"
+    echo "machine: $(uname -srm), $(nproc) threads"
+    echo
+    echo "Restore: tar -C <parent> -xzf <name>.tar.gz  (results -> ~/learning-algo, threeview_results ->"
+    echo "~/learning-algo/third_party/threeview, weights_torch -> ~/.cache/torch, weights_huggingface -> ~/.cache)."
+    echo "Datasets (triplets, SIFT tracks, semi-synthetic sets) stay on the SSD under data/; code is on GitHub."
+  } >"$dir/README.txt"
+  "$PY" -m pip freeze >"$dir/env_venv.txt" 2>/dev/null
+  [[ -x $NETPY ]] && "$NETPY" -m pip freeze >"$dir/env_venv_nets.txt" 2>/dev/null
+  command -v conda >/dev/null && conda list >"$dir/env_conda.txt" 2>/dev/null
+  ( cd "$dir" && sha256sum *.tar.gz >SHA256SUMS ) || die "archive: checksums failed"
+  mkdir -p "$SSD/archives" && cp -r "$dir" "$SSD/archives/" || die "archive: copy to $SSD/archives failed"
+  sync -f "$bak" 2>/dev/null || sync
+  ( cd "$bak" && sha256sum -c --quiet SHA256SUMS ) || die "archive: the SSD copy does not match its checksums"
+  log "archive: $dir ($(du -sh "$dir" | cut -f1)) and its verified copy $bak"
+  fi
+  if [[ ${ARCHIVE_REMOVE:-} == 1 ]]; then
+    find "$ROOT/results" -mindepth 1 -maxdepth 1 ! -name abl_dell -exec rm -rf {} +
+    find "$TV/results" -mindepth 1 -delete
+    rm -rf "$HOME/.cache/huggingface/hub/models--facebook--VGGT-1B"
+    log "archive: removed the archived originals (results except results/abl_dell, threeview results, VGGT weights);" \
+        "free in $HOME now $(( $(df --output=avail -B1 "$HOME" | tail -1) >> 30 )) GB"
+  else
+    log "archive: originals kept; rerun with ARCHIVE_REMOVE=1 to remove them and free the space"
+  fi
 }
 
 step_collect() {

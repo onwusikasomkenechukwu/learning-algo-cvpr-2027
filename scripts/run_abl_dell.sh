@@ -57,6 +57,8 @@
 #   requeue    (not default) move results computed before the OOB fix aside so evalf / killA / control rerun
 #   crashdebug replay saved poselib crashes under gdb -> results/abl_dell/crash_report.txt (native backtraces)
 #   collect    copy results to the SSD (abl_dell_results/) so the laptop can read them
+#   report     (not default; runs in the foreground) rerun paper, write reports/abl_dell_<date>/REPORT.md with the
+#              small summary files, commit and push them, so the laptop gets the results with git pull
 #   stop       stop the background runner and every job it started
 # The default list builds every dataset (triplets, eth3d, sift) before any evaluation.
 # Not in the default list:
@@ -102,7 +104,7 @@ NW=$(( $(nproc) - 2 ))   # leave two cores for interactive work (ground rule 6)
 ONE_THREAD=(env OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1)
 mkdir -p "$OUT"
 
-if [[ ${1:-} != status && ${1:-} != stop && -z ${ABL_BG:-} ]]; then
+if [[ ${1:-} != status && ${1:-} != stop && ${1:-} != report && -z ${ABL_BG:-} ]]; then
   old=$(cat "$OUT/runner.pid" 2>/dev/null)
   if [[ -n $old ]] && grep -qa run_abl_dell "/proc/$old/cmdline" 2>/dev/null; then
     echo "a runner is already going (pid $old); stop it first:  bash scripts/run_abl_dell.sh stop"
@@ -962,6 +964,53 @@ step_collect() {
   local empty
   empty=$(find "$dst" -type f -size 0 ! -name control.done ! -name runner.pid 2>/dev/null | wc -l)
   log "copied results to $dst and flushed to disk ($empty empty files); eject the SSD before unplugging it"
+}
+
+step_report() {
+  # The results of a run as files in git, so the laptop gets them with git pull instead of the SSD: reruns paper,
+  # then writes reports/abl_dell_<date>/REPORT.md (status, problems from the logs, matched.md, tables.md,
+  # supplement.md) next to the small summary files, commits them and pushes. Files over 5 MB are listed, not copied.
+  step_paper
+  local day dst f n=0 big=() author
+  day=$(date +%Y%m%d)
+  dst=$ROOT/reports/abl_dell_$day
+  rm -rf "$dst" && mkdir -p "$dst"
+  for f in "$ROOT"/results/matched/{matched.md,summary.json,fig2.png} "$ROOT"/results/paper/* \
+           "$OUT"/{kill_test_stats.md,killA.txt,killB.txt,seq.txt,table2_fixed.txt,machine_sheet.md,crash_report.txt} \
+           "$OUT"/fullsolve/*_summary.json "$ROOT"/results/task28/{summary.json,predictions_*.md} "$SETS/manifest.json" \
+           "$ROOT"/results/runtime_1core_*.txt "$ROOT"/results/vggt/*.times.txt; do
+    [[ -f $f ]] || continue
+    if (( $(stat -c %s "$f") > 5000000 )); then big+=("${f#"$ROOT"/}"); continue; fi
+    cp "$f" "$dst/" && n=$((n + 1))
+  done
+  { echo "# abl-dell results, $(date '+%F %T')"
+    echo
+    echo "git: $(git -C "$ROOT" log -1 --format='%h %cd %s')  "
+    echo "fork build stamp: $(cat "$ROOT/third_party/PoseLib-threeview/.build_stamp" 2>/dev/null)  "
+    echo "files in this folder: $n; too large to commit: ${big[*]:-none}"
+    echo
+    echo '## Status'; echo; echo '```'; step_status 2>&1; echo '```'
+    echo
+    echo '## Problems in the logs'; echo; echo '```'
+    ( cd "$OUT" && grep -a -H -E "[Ff]ailed|FAILED|skipped|missing|Traceback|[A-Za-z]Error\b" ./*.log 2>/dev/null ) \
+      | cut -c1-300 | tail -80
+    echo '```'
+    for f in "$ROOT"/results/matched/matched.md "$ROOT"/results/paper/tables.md "$ROOT"/results/paper/supplement.md; do
+      echo; echo "## ${f#"$ROOT"/}"; echo
+      if [[ -f $f ]]; then cat "$f"; else echo "(missing)"; fi
+    done
+  } >"$dst/REPORT.md"
+  # commit as the repository's usual author when this machine has no git identity of its own
+  author=$(git -C "$ROOT" log -1 --format='%an|%ae')
+  git -C "$ROOT" add -f "$dst" || die "report: git add failed"
+  git -C "$ROOT" -c user.name="$(git -C "$ROOT" config user.name || echo "${author%|*}")" \
+    -c user.email="$(git -C "$ROOT" config user.email || echo "${author#*|}")" \
+    commit -q -m "Add the abl-dell results of $(date +%F)" -- "$dst" || { log "report: nothing new to commit"; }
+  if GIT_TERMINAL_PROMPT=0 git -C "$ROOT" pull -q --rebase --autostash && GIT_TERMINAL_PROMPT=0 git -C "$ROOT" push -q; then
+    log "report: pushed $dst ($n files); on the laptop: git pull"
+  else
+    log "report: committed $dst but the push failed (no GitHub credentials here?); run:  git pull --rebase && git push"
+  fi
 }
 
 step_status() {

@@ -49,7 +49,9 @@
 #     bash scripts/run_abl_dell.sh setup fundamental sets calib seeds extras ablations table2 fullsolve500 timing \
 #       paper compare collect
 #   archive    (not default) pack results, raw outputs, weights and environment lists into ~/archives/cvpr2027_<date>/,
-#              back them up to $SSD/archives/ and verify; ARCHIVE_REMOVE=1 then removes the archived originals
+#              back them up to $SSD/archives/ and verify; ARCHIVE_REMOVE=1 then removes the archived originals.
+#              A current archive is reused and only a missing or partial backup is copied again (after a space check);
+#              ARCHIVE_BACKUP=<dir> backs up elsewhere, ARCHIVE_BACKUP_WEIGHTS=0 leaves the weights out of the backup
 #   control    5pt+P3P+R+F control row (eval.py '5p3v + R + C') on the released triplets, own results file
 #   eth3d      ETH3D SP+LG triplets (12 scenes, 800 px): every image triplet within one intrinsics block that passes
 #              the overlap test, at most ETH_N = 2000 per scene (Tasks 1.4 / 1.6)
@@ -882,9 +884,12 @@ step_archive() {
   # member counts, sha256). Nothing is removed unless ARCHIVE_REMOVE=1, and then only after every archive verified and
   # only the archived results and weight caches (never code, environments or the datasets on the SSD).
   pgrep -f "$JOBS" >/dev/null && die "archive: jobs of a run are still going (wait, or bash scripts/run_abl_dell.sh stop)"
-  local day dir bak gz item name parent member n_src n_tar need avail
+  local day dir bak gz item name parent member n_src n_tar need avail f copy=() sums
   day=$(date +%Y%m%d)
-  dir=$HOME/archives/cvpr2027_$day bak=$SSD/archives/cvpr2027_$day gz=gzip
+  # the newest earlier archive is reused when it is still current (a rerun after midnight must not pack it all again)
+  dir=$(ls -d "$HOME"/archives/cvpr2027_* 2>/dev/null | sort | tail -1)
+  [[ -n $dir && -f $dir/SHA256SUMS ]] || dir=$HOME/archives/cvpr2027_$day
+  gz=gzip
   command -v pigz >/dev/null && gz="pigz -p $NW"
   local items=("results|$ROOT|results" "threeview_results|$TV|results" "weights_torch|$HOME/.cache/torch|hub"
                "weights_huggingface|$HOME/.cache|huggingface")
@@ -893,10 +898,9 @@ step_archive() {
     IFS='|' read -r name parent member <<<"$item"
     [[ -e $parent/$member ]] && need=$((need + $(du -sb "$parent/$member" | cut -f1)))
   done
-  # today's archives are reused when both copies verify and no archived file changed since they were written
+  # the archives are reused when they verify and no archived file changed since they were written
   local fresh=1
-  if [[ -f $dir/SHA256SUMS && -f $bak/SHA256SUMS ]] && ( cd "$dir" && sha256sum -c --quiet SHA256SUMS ) \
-     && ( cd "$bak" && sha256sum -c --quiet SHA256SUMS ); then
+  if [[ -f $dir/SHA256SUMS ]] && ( cd "$dir" && sha256sum -c --quiet SHA256SUMS ); then
     fresh=0
     for item in "${items[@]}"; do
       IFS='|' read -r name parent member <<<"$item"
@@ -904,8 +908,10 @@ step_archive() {
     done
   fi
   if (( fresh == 0 )); then
-    log "archive: today's archives in $dir and $bak are verified and current; not packing again"
+    log "archive: the archives in $dir are verified and current; not packing again"
   else
+  dir=$HOME/archives/cvpr2027_$day
+  rm -rf "$dir"
   avail=$(df --output=avail -B1 "$HOME" | tail -1)
   (( avail > need )) || die "archive: $((need >> 30)) GB to pack but only $((avail >> 30)) GB free in $HOME"
   mkdir -p "$dir"
@@ -933,10 +939,34 @@ step_archive() {
   [[ -x $NETPY ]] && "$NETPY" -m pip freeze >"$dir/env_venv_nets.txt" 2>/dev/null
   command -v conda >/dev/null && conda list >"$dir/env_conda.txt" 2>/dev/null
   ( cd "$dir" && sha256sum *.tar.gz >SHA256SUMS ) || die "archive: checksums failed"
-  mkdir -p "$SSD/archives" && cp -r "$dir" "$SSD/archives/" || die "archive: copy to $SSD/archives failed"
-  sync -f "$bak" 2>/dev/null || sync
-  ( cd "$bak" && sha256sum -c --quiet SHA256SUMS ) || die "archive: the SSD copy does not match its checksums"
-  log "archive: $dir ($(du -sh "$dir" | cut -f1)) and its verified copy $bak"
+  log "archive: $dir ($(du -sh "$dir" | cut -f1)) packed and verified"
+  fi
+  # The backup copy (ARCHIVE_BACKUP, $SSD/archives by default). ARCHIVE_BACKUP_WEIGHTS=0 leaves the network weights
+  # out of it (they can be downloaded again). A copy that already verifies is kept; a partial one is replaced, after
+  # checking that the disk has room (2026-11-04: the SSD filled up halfway through the first copy).
+  bak=${ARCHIVE_BACKUP:-$SSD/archives}/${dir##*/}
+  for f in "$dir"/*; do
+    [[ ${ARCHIVE_BACKUP_WEIGHTS:-1} == 0 && ${f##*/} == weights_* ]] || copy+=("$f")
+  done
+  sums=$(grep -v "$([[ ${ARCHIVE_BACKUP_WEIGHTS:-1} == 0 ]] && echo ' [ *]weights_' || echo '^$')" "$dir/SHA256SUMS")
+  if [[ -f $bak/SHA256SUMS && $(cat "$bak/SHA256SUMS") == "$sums" ]] && ( cd "$bak" && sha256sum -c --quiet SHA256SUMS ) \
+     && [[ $(ls "$bak" | sort) == $(for f in "${copy[@]}"; do echo "${f##*/}"; done | sort) ]]; then
+    log "archive: the backup $bak is already complete and verified"
+  else
+    rm -rf "$bak"
+    mkdir -p "${bak%/*}" || die "archive: cannot create ${bak%/*}"
+    need=$(du -scb "${copy[@]}" | tail -1 | cut -f1)
+    avail=$(df --output=avail -B1 "${bak%/*}" | tail -1)
+    if (( avail < need + (1 << 30) )); then
+      du -sh "${copy[@]}" | sed "s#$dir/#  #"
+      die "archive: the backup needs $((need >> 30)) GB but ${bak%/*} has $((avail >> 30)) GB free; free space there," \
+          "set ARCHIVE_BACKUP=<another disk>, or ARCHIVE_BACKUP_WEIGHTS=0 to leave the weights out"
+    fi
+    mkdir -p "$bak" && cp "${copy[@]}" "$bak/" || die "archive: copy to $bak failed"
+    printf '%s\n' "$sums" >"$bak/SHA256SUMS"
+    sync -f "$bak" 2>/dev/null || sync
+    ( cd "$bak" && sha256sum -c --quiet SHA256SUMS ) || die "archive: the copy in $bak does not match its checksums"
+    log "archive: $dir and its verified copy $bak ($(du -sh "$bak" | cut -f1))"
   fi
   if [[ ${ARCHIVE_REMOVE:-} == 1 ]]; then
     find "$ROOT/results" -mindepth 1 -maxdepth 1 ! -name abl_dell -exec rm -rf {} +

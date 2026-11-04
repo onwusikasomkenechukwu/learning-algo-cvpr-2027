@@ -1,0 +1,8 @@
+scene                n strict n  cont %   LM %   NH % Newton % McNemar c/l        p
+KingsCollege      4790     1446    17.0   24.5    8.5      5.0    47/155    1.1e-14
+OldHospital       4383      959    11.9   17.8    6.9      4.4    26/83       4e-08
+ShopFacade        4607     1180    14.8   20.8    6.9      5.0    41/112    8.3e-09
+StMarysChurch     4668     1275    20.5   26.2   10.7      6.8    45/118    9.7e-09
+GreatCourt        4736      919    11.8   15.9    5.9      4.1    21/59     2.5e-05
+POOLED           23184     5779    15.6   21.6    8.0      5.2   180/527    2.4e-40
+KILL TEST B: cont - LM = -6.0 pp (needs >= +5), McNemar p = 2.4e-40 -> FAIL

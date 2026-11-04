@@ -1,0 +1,39 @@
+{
+ "args": {
+  "start": "/home/abl-dell/learning-algo/results/abl_dell/fullsolve/monodromy_0.npz",
+  "mode": "random",
+  "scene": null,
+  "nvm": null,
+  "feature": "triplets-features_superpoint_800_2048-LG",
+  "theta": 2.0,
+  "noise": 1.0,
+  "n": 100,
+  "nproc": 94,
+  "rng": 0,
+  "out": "/home/abl-dell/learning-algo/results/abl_dell/fullsolve/random"
+ },
+ "samples": 100,
+ "ref": {
+  "ok": 63,
+  "ambiguous": 36,
+  "not_real": 1
+ },
+ "start_roots": 2672,
+ "finished_median": 2592.0,
+ "distinct_median": 2592.0,
+ "real_median": 400.0,
+ "accepted_real_median": 3.0,
+ "tool_in_full_solve": [
+  1.0,
+  63
+ ],
+ "tool_is_closest_accepted": [
+  0.8688524590163934,
+  61
+ ],
+ "tool_accepted": [
+  0.9180327868852459,
+  61
+ ],
+ "seconds_median": 1022.8413509130478
+}

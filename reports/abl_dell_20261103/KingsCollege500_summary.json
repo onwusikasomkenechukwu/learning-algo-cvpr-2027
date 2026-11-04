@@ -1,0 +1,39 @@
+{
+ "args": {
+  "start": "/home/abl-dell/learning-algo/results/abl_dell/fullsolve/monodromy_0.npz",
+  "mode": "triplets",
+  "scene": "/media/abl-dell/SSD/learning-algo-cvpr/data/cambridge_triplets/KingsCollege",
+  "nvm": "/media/abl-dell/SSD/learning-algo-cvpr/data/cambridge/KingsCollege/reconstruction.nvm",
+  "feature": "triplets-features_superpoint_800_2048-LG",
+  "theta": 2.0,
+  "noise": 1.0,
+  "n": 500,
+  "nproc": 94,
+  "rng": 1,
+  "out": "/home/abl-dell/learning-algo/results/abl_dell/fullsolve/KingsCollege500"
+ },
+ "samples": 500,
+ "ref": {
+  "ok": 238,
+  "ambiguous": 255,
+  "not_real": 7
+ },
+ "start_roots": 2672,
+ "finished_median": 2540.0,
+ "distinct_median": 2540.0,
+ "real_median": 384.0,
+ "accepted_real_median": 4.0,
+ "tool_in_full_solve": [
+  0.9831932773109243,
+  238
+ ],
+ "tool_is_closest_accepted": [
+  0.7890295358649789,
+  237
+ ],
+ "tool_accepted": [
+  0.9620253164556962,
+  237
+ ],
+ "seconds_median": 1375.2943086624146
+}

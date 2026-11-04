@@ -1,0 +1,626 @@
+{
+ "settings": {
+  "labels": "/home/abl-dell/learning-algo/results/task28/triplets.csv",
+  "cambridge": "/media/abl-dell/SSD/learning-algo-cvpr/data/cambridge_triplets",
+  "eth3d": "/media/abl-dell/SSD/learning-algo-cvpr/data/eth3d_triplets",
+  "out": "/home/abl-dell/learning-algo/results/sets",
+  "theta": 2.0,
+  "min_inliers": 12,
+  "sp_ratio": 0.5,
+  "w_max": 0.4,
+  "splg_n": 1000,
+  "time_n": 100,
+  "seed": 0,
+  "theta2": 4.0,
+  "view3": [
+   "splg",
+   "sift_low"
+  ]
+ },
+ "sets": {
+  "sift": {
+   "feature": "triplets-SIFT_triplet_correspondences-rootsift8000",
+   "scenes": {
+    "GreatCourt": {
+     "dataset": "cambridge",
+     "triplets": 2481,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift/GreatCourt"
+    },
+    "KingsCollege": {
+     "dataset": "cambridge",
+     "triplets": 3696,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift/KingsCollege"
+    },
+    "OldHospital": {
+     "dataset": "cambridge",
+     "triplets": 1029,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift/OldHospital"
+    },
+    "ShopFacade": {
+     "dataset": "cambridge",
+     "triplets": 3559,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift/ShopFacade"
+    },
+    "StMarysChurch": {
+     "dataset": "cambridge",
+     "triplets": 2346,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift/StMarysChurch"
+    },
+    "delivery_area": {
+     "dataset": "eth3d",
+     "triplets": 587,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift/delivery_area"
+    },
+    "electro": {
+     "dataset": "eth3d",
+     "triplets": 58,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift/electro"
+    },
+    "kicker": {
+     "dataset": "eth3d",
+     "triplets": 358,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift/kicker"
+    },
+    "meadow": {
+     "dataset": "eth3d",
+     "triplets": 3,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift/meadow"
+    },
+    "office": {
+     "dataset": "eth3d",
+     "triplets": 232,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift/office"
+    },
+    "pipes": {
+     "dataset": "eth3d",
+     "triplets": 42,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift/pipes"
+    },
+    "playground": {
+     "dataset": "eth3d",
+     "triplets": 45,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift/playground"
+    },
+    "relief": {
+     "dataset": "eth3d",
+     "triplets": 371,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift/relief"
+    },
+    "relief_2": {
+     "dataset": "eth3d",
+     "triplets": 288,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift/relief_2"
+    },
+    "terrace": {
+     "dataset": "eth3d",
+     "triplets": 84,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift/terrace"
+    },
+    "terrains": {
+     "dataset": "eth3d",
+     "triplets": 551,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift/terrains"
+    }
+   },
+   "triplets": 15730
+  },
+  "sift_low": {
+   "feature": "triplets-SIFT_triplet_correspondences-rootsift8000",
+   "scenes": {
+    "GreatCourt": {
+     "dataset": "cambridge",
+     "triplets": 2138,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low/GreatCourt"
+    },
+    "KingsCollege": {
+     "dataset": "cambridge",
+     "triplets": 3192,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low/KingsCollege"
+    },
+    "OldHospital": {
+     "dataset": "cambridge",
+     "triplets": 1027,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low/OldHospital"
+    },
+    "ShopFacade": {
+     "dataset": "cambridge",
+     "triplets": 3316,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low/ShopFacade"
+    },
+    "StMarysChurch": {
+     "dataset": "cambridge",
+     "triplets": 2008,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low/StMarysChurch"
+    },
+    "delivery_area": {
+     "dataset": "eth3d",
+     "triplets": 482,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low/delivery_area"
+    },
+    "electro": {
+     "dataset": "eth3d",
+     "triplets": 46,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low/electro"
+    },
+    "kicker": {
+     "dataset": "eth3d",
+     "triplets": 318,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low/kicker"
+    },
+    "meadow": {
+     "dataset": "eth3d",
+     "triplets": 3,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low/meadow"
+    },
+    "office": {
+     "dataset": "eth3d",
+     "triplets": 229,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low/office"
+    },
+    "pipes": {
+     "dataset": "eth3d",
+     "triplets": 38,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low/pipes"
+    },
+    "playground": {
+     "dataset": "eth3d",
+     "triplets": 43,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low/playground"
+    },
+    "relief": {
+     "dataset": "eth3d",
+     "triplets": 143,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low/relief"
+    },
+    "relief_2": {
+     "dataset": "eth3d",
+     "triplets": 185,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low/relief_2"
+    },
+    "terrace": {
+     "dataset": "eth3d",
+     "triplets": 79,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low/terrace"
+    },
+    "terrains": {
+     "dataset": "eth3d",
+     "triplets": 497,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low/terrains"
+    }
+   },
+   "triplets": 13744
+  },
+  "splg": {
+   "feature": "triplets-features_superpoint_800_2048-LG",
+   "scenes": {
+    "GreatCourt": {
+     "dataset": "cambridge",
+     "triplets": 1000,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg/GreatCourt"
+    },
+    "KingsCollege": {
+     "dataset": "cambridge",
+     "triplets": 1000,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg/KingsCollege"
+    },
+    "OldHospital": {
+     "dataset": "cambridge",
+     "triplets": 1000,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg/OldHospital"
+    },
+    "ShopFacade": {
+     "dataset": "cambridge",
+     "triplets": 1000,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg/ShopFacade"
+    },
+    "StMarysChurch": {
+     "dataset": "cambridge",
+     "triplets": 1000,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg/StMarysChurch"
+    },
+    "delivery_area": {
+     "dataset": "eth3d",
+     "triplets": 599,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg/delivery_area"
+    },
+    "electro": {
+     "dataset": "eth3d",
+     "triplets": 208,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg/electro"
+    },
+    "kicker": {
+     "dataset": "eth3d",
+     "triplets": 358,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg/kicker"
+    },
+    "meadow": {
+     "dataset": "eth3d",
+     "triplets": 16,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg/meadow"
+    },
+    "office": {
+     "dataset": "eth3d",
+     "triplets": 283,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg/office"
+    },
+    "pipes": {
+     "dataset": "eth3d",
+     "triplets": 45,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg/pipes"
+    },
+    "playground": {
+     "dataset": "eth3d",
+     "triplets": 133,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg/playground"
+    },
+    "relief": {
+     "dataset": "eth3d",
+     "triplets": 393,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg/relief"
+    },
+    "relief_2": {
+     "dataset": "eth3d",
+     "triplets": 306,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg/relief_2"
+    },
+    "terrace": {
+     "dataset": "eth3d",
+     "triplets": 86,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg/terrace"
+    },
+    "terrains": {
+     "dataset": "eth3d",
+     "triplets": 615,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg/terrains"
+    }
+   },
+   "triplets": 8042
+  },
+  "sift_time": {
+   "feature": "triplets-SIFT_triplet_correspondences-rootsift8000",
+   "scenes": {
+    "GreatCourt": {
+     "dataset": "cambridge",
+     "triplets": 16,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_time/GreatCourt"
+    },
+    "KingsCollege": {
+     "dataset": "cambridge",
+     "triplets": 23,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_time/KingsCollege"
+    },
+    "OldHospital": {
+     "dataset": "cambridge",
+     "triplets": 7,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_time/OldHospital"
+    },
+    "ShopFacade": {
+     "dataset": "cambridge",
+     "triplets": 24,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_time/ShopFacade"
+    },
+    "StMarysChurch": {
+     "dataset": "cambridge",
+     "triplets": 15,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_time/StMarysChurch"
+    },
+    "delivery_area": {
+     "dataset": "eth3d",
+     "triplets": 4,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_time/delivery_area"
+    },
+    "electro": {
+     "dataset": "eth3d",
+     "triplets": 1,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_time/electro"
+    },
+    "kicker": {
+     "dataset": "eth3d",
+     "triplets": 2,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_time/kicker"
+    },
+    "meadow": {
+     "dataset": "eth3d",
+     "triplets": 1,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_time/meadow"
+    },
+    "office": {
+     "dataset": "eth3d",
+     "triplets": 2,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_time/office"
+    },
+    "pipes": {
+     "dataset": "eth3d",
+     "triplets": 1,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_time/pipes"
+    },
+    "playground": {
+     "dataset": "eth3d",
+     "triplets": 1,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_time/playground"
+    },
+    "relief": {
+     "dataset": "eth3d",
+     "triplets": 1,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_time/relief"
+    },
+    "relief_2": {
+     "dataset": "eth3d",
+     "triplets": 1,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_time/relief_2"
+    },
+    "terrace": {
+     "dataset": "eth3d",
+     "triplets": 1,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_time/terrace"
+    },
+    "terrains": {
+     "dataset": "eth3d",
+     "triplets": 4,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_time/terrains"
+    }
+   },
+   "triplets": 104
+  },
+  "splg_time": {
+   "feature": "triplets-features_superpoint_800_2048-LG",
+   "scenes": {
+    "GreatCourt": {
+     "dataset": "cambridge",
+     "triplets": 12,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_time/GreatCourt"
+    },
+    "KingsCollege": {
+     "dataset": "cambridge",
+     "triplets": 12,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_time/KingsCollege"
+    },
+    "OldHospital": {
+     "dataset": "cambridge",
+     "triplets": 12,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_time/OldHospital"
+    },
+    "ShopFacade": {
+     "dataset": "cambridge",
+     "triplets": 12,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_time/ShopFacade"
+    },
+    "StMarysChurch": {
+     "dataset": "cambridge",
+     "triplets": 12,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_time/StMarysChurch"
+    },
+    "delivery_area": {
+     "dataset": "eth3d",
+     "triplets": 7,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_time/delivery_area"
+    },
+    "electro": {
+     "dataset": "eth3d",
+     "triplets": 3,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_time/electro"
+    },
+    "kicker": {
+     "dataset": "eth3d",
+     "triplets": 4,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_time/kicker"
+    },
+    "meadow": {
+     "dataset": "eth3d",
+     "triplets": 1,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_time/meadow"
+    },
+    "office": {
+     "dataset": "eth3d",
+     "triplets": 4,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_time/office"
+    },
+    "pipes": {
+     "dataset": "eth3d",
+     "triplets": 1,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_time/pipes"
+    },
+    "playground": {
+     "dataset": "eth3d",
+     "triplets": 2,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_time/playground"
+    },
+    "relief": {
+     "dataset": "eth3d",
+     "triplets": 5,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_time/relief"
+    },
+    "relief_2": {
+     "dataset": "eth3d",
+     "triplets": 4,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_time/relief_2"
+    },
+    "terrace": {
+     "dataset": "eth3d",
+     "triplets": 1,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_time/terrace"
+    },
+    "terrains": {
+     "dataset": "eth3d",
+     "triplets": 8,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_time/terrains"
+    }
+   },
+   "triplets": 100
+  },
+  "splg_v3": {
+   "feature": "triplets-features_superpoint_800_2048-LG",
+   "scenes": {
+    "GreatCourt": {
+     "dataset": "cambridge",
+     "triplets": 1000,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_v3/GreatCourt"
+    },
+    "KingsCollege": {
+     "dataset": "cambridge",
+     "triplets": 1000,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_v3/KingsCollege"
+    },
+    "OldHospital": {
+     "dataset": "cambridge",
+     "triplets": 1000,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_v3/OldHospital"
+    },
+    "ShopFacade": {
+     "dataset": "cambridge",
+     "triplets": 1000,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_v3/ShopFacade"
+    },
+    "StMarysChurch": {
+     "dataset": "cambridge",
+     "triplets": 1000,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_v3/StMarysChurch"
+    },
+    "delivery_area": {
+     "dataset": "eth3d",
+     "triplets": 599,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_v3/delivery_area"
+    },
+    "electro": {
+     "dataset": "eth3d",
+     "triplets": 208,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_v3/electro"
+    },
+    "kicker": {
+     "dataset": "eth3d",
+     "triplets": 358,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_v3/kicker"
+    },
+    "meadow": {
+     "dataset": "eth3d",
+     "triplets": 16,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_v3/meadow"
+    },
+    "office": {
+     "dataset": "eth3d",
+     "triplets": 283,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_v3/office"
+    },
+    "pipes": {
+     "dataset": "eth3d",
+     "triplets": 45,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_v3/pipes"
+    },
+    "playground": {
+     "dataset": "eth3d",
+     "triplets": 133,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_v3/playground"
+    },
+    "relief": {
+     "dataset": "eth3d",
+     "triplets": 393,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_v3/relief"
+    },
+    "relief_2": {
+     "dataset": "eth3d",
+     "triplets": 306,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_v3/relief_2"
+    },
+    "terrace": {
+     "dataset": "eth3d",
+     "triplets": 86,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_v3/terrace"
+    },
+    "terrains": {
+     "dataset": "eth3d",
+     "triplets": 615,
+     "dir": "/home/abl-dell/learning-algo/results/sets/splg_v3/terrains"
+    }
+   },
+   "swapped_views": "2 and 3",
+   "triplets": 8042
+  },
+  "sift_low_v3": {
+   "feature": "triplets-SIFT_triplet_correspondences-rootsift8000",
+   "scenes": {
+    "GreatCourt": {
+     "dataset": "cambridge",
+     "triplets": 2138,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low_v3/GreatCourt"
+    },
+    "KingsCollege": {
+     "dataset": "cambridge",
+     "triplets": 3192,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low_v3/KingsCollege"
+    },
+    "OldHospital": {
+     "dataset": "cambridge",
+     "triplets": 1027,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low_v3/OldHospital"
+    },
+    "ShopFacade": {
+     "dataset": "cambridge",
+     "triplets": 3316,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low_v3/ShopFacade"
+    },
+    "StMarysChurch": {
+     "dataset": "cambridge",
+     "triplets": 2008,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low_v3/StMarysChurch"
+    },
+    "delivery_area": {
+     "dataset": "eth3d",
+     "triplets": 482,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low_v3/delivery_area"
+    },
+    "electro": {
+     "dataset": "eth3d",
+     "triplets": 46,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low_v3/electro"
+    },
+    "kicker": {
+     "dataset": "eth3d",
+     "triplets": 318,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low_v3/kicker"
+    },
+    "meadow": {
+     "dataset": "eth3d",
+     "triplets": 3,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low_v3/meadow"
+    },
+    "office": {
+     "dataset": "eth3d",
+     "triplets": 229,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low_v3/office"
+    },
+    "pipes": {
+     "dataset": "eth3d",
+     "triplets": 38,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low_v3/pipes"
+    },
+    "playground": {
+     "dataset": "eth3d",
+     "triplets": 43,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low_v3/playground"
+    },
+    "relief": {
+     "dataset": "eth3d",
+     "triplets": 143,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low_v3/relief"
+    },
+    "relief_2": {
+     "dataset": "eth3d",
+     "triplets": 185,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low_v3/relief_2"
+    },
+    "terrace": {
+     "dataset": "eth3d",
+     "triplets": 79,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low_v3/terrace"
+    },
+    "terrains": {
+     "dataset": "eth3d",
+     "triplets": 497,
+     "dir": "/home/abl-dell/learning-algo/results/sets/sift_low_v3/terrains"
+    }
+   },
+   "swapped_views": "2 and 3",
+   "triplets": 13744
+  }
+ }
+}

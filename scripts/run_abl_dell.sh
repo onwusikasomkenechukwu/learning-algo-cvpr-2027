@@ -978,7 +978,7 @@ step_report() {
   for f in "$ROOT"/results/matched/{matched.md,summary.json,fig2.png} "$ROOT"/results/paper/* \
            "$OUT"/{kill_test_stats.md,killA.txt,killB.txt,seq.txt,table2_fixed.txt,machine_sheet.md,crash_report.txt} \
            "$OUT"/fullsolve/*_summary.json "$ROOT"/results/task28/{summary.json,predictions_*.md} "$SETS/manifest.json" \
-           "$ROOT"/results/runtime_1core_*.txt "$ROOT"/results/vggt/*.times.txt; do
+           "$ROOT"/results/runtime_1core_*.txt; do
     [[ -f $f ]] || continue
     if (( $(stat -c %s "$f") > 5000000 )); then big+=("${f#"$ROOT"/}"); continue; fi
     cp "$f" "$dst/" && n=$((n + 1))
@@ -1000,16 +1000,19 @@ step_report() {
       if [[ -f $f ]]; then cat "$f"; else echo "(missing)"; fi
     done
   } >"$dst/REPORT.md"
-  # commit as the repository's usual author when this machine has no git identity of its own
-  author=$(git -C "$ROOT" log -1 --format='%an|%ae')
+  # commit as the author of this script's last change, never as the git identity of this shared machine (another
+  # lab member's: the first report on 2026-11-03 went out under it)
+  author=$(git -C "$ROOT" log -1 --format='%an|%ae' -- scripts/run_abl_dell.sh)
   git -C "$ROOT" add -f "$dst" || die "report: git add failed"
-  git -C "$ROOT" -c user.name="$(git -C "$ROOT" config user.name || echo "${author%|*}")" \
-    -c user.email="$(git -C "$ROOT" config user.email || echo "${author#*|}")" \
+  git -C "$ROOT" -c user.name="${author%|*}" -c user.email="${author#*|}" \
     commit -q -m "Add the abl-dell results of $(date +%F)" -- "$dst" || { log "report: nothing new to commit"; }
   if GIT_TERMINAL_PROMPT=0 git -C "$ROOT" pull -q --rebase --autostash && GIT_TERMINAL_PROMPT=0 git -C "$ROOT" push -q; then
     log "report: pushed $dst ($n files); on the laptop: git pull"
   else
-    log "report: committed $dst but the push failed (no GitHub credentials here?); run:  git pull --rebase && git push"
+    # abl-dell's gh login belongs to other lab members: push once with your own token, nothing stored
+    log "report: committed $dst but the push failed; push it with your own token (nothing is stored):" \
+        "git -c credential.helper= -c credential.https://github.com.helper= push" \
+        "https://$(git -C "$ROOT" remote get-url origin | sed -E 's#https://([^@/]*@)?github.com/([^/]+)/.*#\2#')@github.com/$(git -C "$ROOT" remote get-url origin | sed -E 's#https://([^@/]*@)?github.com/##') main"
   fi
 }
 
